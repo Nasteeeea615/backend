@@ -1,0 +1,186 @@
+import pool from '../config/database';
+import { Payment } from '../types';
+import { AppError } from '../middleware/errorHandler';
+import { io } from '../index';
+import notificationService from './notificationService';
+
+class PaymentService {
+  /**
+   * Create payment for order
+   */
+  async createPayment(orderId: string, clientId: string, paymentMethod: any): Promise<Payment> {
+    // Get order details
+    const orderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
+
+    if (orderResult.rows.length === 0) {
+      throw new AppError('ORDER_NOT_FOUND', 'Order not found', 404);
+    }
+
+    const order = orderResult.rows[0];
+
+    // Check if order belongs to client
+    if (order.client_id !== clientId) {
+      throw new AppError('FORBIDDEN', 'This order does not belong to you', 403);
+    }
+
+    // Check if order is completed
+    if (order.status !== 'completed') {
+      throw new AppError('ORDER_NOT_COMPLETED', 'Order must be completed before payment', 400);
+    }
+
+    // Check if payment already exists
+    const existingPayment = await pool.query(
+      'SELECT * FROM payments WHERE order_id = $1 AND status = $2',
+      [orderId, 'completed']
+    );
+
+    if (existingPayment.rows.length > 0) {
+      throw new AppError('PAYMENT_ALREADY_EXISTS', 'Order has already been paid', 400);
+    }
+
+    // Create payment record
+    const result = await pool.query(
+      `INSERT INTO payments (order_id, client_id, amount, status, payment_method)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [orderId, clientId, order.price, 'pending', JSON.stringify(paymentMethod)]
+    );
+
+    const payment = result.rows[0];
+
+    // In production, integrate with payment gateway (YooKassa/Stripe)
+    // For now, simulate successful payment
+    await this.processPayment(payment.id);
+
+    return payment;
+  }
+
+  /**
+   * Process payment (simulate payment gateway)
+   */
+  async processPayment(paymentId: string): Promise<void> {
+    // In production, this would call payment gateway API
+    // For development, we'll simulate successful payment
+
+    const transactionId = `txn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    await pool.query(
+      `UPDATE payments 
+       SET status = 'completed', transaction_id = $1, completed_at = NOW()
+       WHERE id = $2`,
+      [transactionId, paymentId]
+    );
+
+    // Get payment details
+    const result = await pool.query(
+      `SELECT p.*, o.client_id, o.executor_id 
+       FROM payments p
+       JOIN orders o ON p.order_id = o.id
+       WHERE p.id = $1`,
+      [paymentId]
+    );
+
+    const payment = result.rows[0];
+
+    // Send push notifications
+    await notificationService.notifyPaymentSuccess(payment.client_id, payment.order_id, payment.amount);
+    
+    if (payment.executor_id) {
+      await notificationService.notifyPaymentSuccess(payment.executor_id, payment.order_id, payment.amount);
+    }
+
+    // Send WebSocket notifications
+    io.emit(`client:${payment.client_id}`, {
+      type: 'payment:success',
+      paymentId,
+      message: 'Оплата прошла успешно',
+    });
+
+    if (payment.executor_id) {
+      io.emit(`executor:${payment.executor_id}`, {
+        type: 'payment:received',
+        paymentId,
+        message: 'Клиент оплатил заказ',
+      });
+    }
+  }
+
+  /**
+   * Get payment by order ID
+   */
+  async getPaymentByOrderId(orderId: string): Promise<Payment | null> {
+    const result = await pool.query('SELECT * FROM payments WHERE order_id = $1', [orderId]);
+
+    return result.rows.length > 0 ? result.rows[0] : null;
+  }
+
+  /**
+   * Save payment method for future use
+   */
+  async savePaymentMethod(clientId: string, paymentMethod: any): Promise<void> {
+    await pool.query(
+      `UPDATE client_profiles 
+       SET saved_payment_methods = saved_payment_methods || $1::jsonb
+       WHERE user_id = $2`,
+      [JSON.stringify([paymentMethod]), clientId]
+    );
+  }
+
+  /**
+   * Get saved payment methods
+   */
+  async getSavedPaymentMethods(clientId: string): Promise<any[]> {
+    const result = await pool.query(
+      'SELECT saved_payment_methods FROM client_profiles WHERE user_id = $1',
+      [clientId]
+    );
+
+    if (result.rows.length === 0) {
+      return [];
+    }
+
+    return result.rows[0].saved_payment_methods || [];
+  }
+
+  /**
+   * Process refund
+   */
+  async refundPayment(paymentId: string): Promise<Payment> {
+    const result = await pool.query('SELECT * FROM payments WHERE id = $1', [paymentId]);
+
+    if (result.rows.length === 0) {
+      throw new AppError('PAYMENT_NOT_FOUND', 'Payment not found', 404);
+    }
+
+    const payment = result.rows[0];
+
+    if (payment.status !== 'completed') {
+      throw new AppError('PAYMENT_NOT_COMPLETED', 'Only completed payments can be refunded', 400);
+    }
+
+    // In production, call payment gateway refund API
+    const updateResult = await pool.query(
+      'UPDATE payments SET status = $1 WHERE id = $2 RETURNING *',
+      ['refunded', paymentId]
+    );
+
+    const refundedPayment = updateResult.rows[0];
+
+    // Get order details for notification
+    const orderResult = await pool.query('SELECT client_id FROM orders WHERE id = $1', [
+      payment.order_id,
+    ]);
+
+    if (orderResult.rows.length > 0) {
+      io.emit(`client:${orderResult.rows[0].client_id}`, {
+        type: 'payment:refunded',
+        paymentId,
+        message: 'Платеж возвращен',
+      });
+    }
+
+    return refundedPayment;
+  }
+}
+
+export default new PaymentService();
