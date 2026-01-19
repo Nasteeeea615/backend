@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest, APIResponse } from '../types';
-import { AppError, asyncHandler } from '../middleware/errorHandler';
+import { AppError, ErrorCode } from '../types/errors';
+import { asyncHandler } from '../middleware/errorHandler';
 import userService from '../services/userService';
 import pool from '../config/database';
 
@@ -11,7 +12,7 @@ class ProfileController {
    */
   getProfile = asyncHandler(async (req: AuthRequest, res: Response) => {
     if (!req.user) {
-      throw new AppError('UNAUTHORIZED', 'Authentication required', 401);
+      throw new AppError(ErrorCode.UNAUTHORIZED, 'Authentication required', 401);
     }
 
     const user = await userService.getUserWithProfile(req.user.id);
@@ -30,7 +31,7 @@ class ProfileController {
    */
   updateProfile = asyncHandler(async (req: AuthRequest, res: Response) => {
     if (!req.user) {
-      throw new AppError('UNAUTHORIZED', 'Authentication required', 401);
+      throw new AppError(ErrorCode.UNAUTHORIZED, 'Authentication required', 401);
     }
 
     const { name, city, street, house_number, vehicle_number } = req.body;
@@ -93,7 +94,7 @@ class ProfileController {
    */
   deleteProfile = asyncHandler(async (req: AuthRequest, res: Response) => {
     if (!req.user) {
-      throw new AppError('UNAUTHORIZED', 'Authentication required', 401);
+      throw new AppError(ErrorCode.UNAUTHORIZED, 'Authentication required', 401);
     }
 
     // Delete user (cascade will delete profiles)
@@ -102,6 +103,157 @@ class ProfileController {
     const response: APIResponse = {
       success: true,
       data: { message: 'Account deleted successfully' },
+    };
+
+    res.json(response);
+  });
+
+  /**
+   * DELETE /api/account
+   * Delete user account (alias for deleteProfile)
+   */
+  deleteAccount = asyncHandler(async (req: AuthRequest, res: Response) => {
+    if (!req.user) {
+      throw new AppError(ErrorCode.UNAUTHORIZED, 'Authentication required', 401);
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Soft delete or mark orders as deleted for audit
+      await client.query(
+        `UPDATE orders 
+         SET status = 'deleted', updated_at = NOW() 
+         WHERE client_id = $1 OR executor_id = $1`,
+        [req.user.id]
+      );
+
+      // Delete user (cascade will delete profiles)
+      await client.query('DELETE FROM users WHERE id = $1', [req.user.id]);
+
+      await client.query('COMMIT');
+
+      const response: APIResponse = {
+        success: true,
+        data: { message: 'Account deleted successfully' },
+      };
+
+      res.json(response);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
+
+  /**
+   * GET /api/check-role/:role
+   * Check if user is registered in a specific role
+   */
+  checkRole = asyncHandler(async (req: AuthRequest, res: Response) => {
+    if (!req.user) {
+      throw new AppError(ErrorCode.UNAUTHORIZED, 'Authentication required', 401);
+    }
+
+    const { role } = req.params;
+
+    if (role !== 'client' && role !== 'executor') {
+      throw new AppError(ErrorCode.VALIDATION_ERROR, 'Invalid role', 400);
+    }
+
+    let isRegistered = false;
+
+    if (role === 'client') {
+      const result = await pool.query(
+        'SELECT id FROM client_profiles WHERE user_id = $1',
+        [req.user.id]
+      );
+      isRegistered = result.rows.length > 0;
+    } else if (role === 'executor') {
+      const result = await pool.query(
+        'SELECT id FROM executor_profiles WHERE user_id = $1',
+        [req.user.id]
+      );
+      isRegistered = result.rows.length > 0;
+    }
+
+    const response: APIResponse = {
+      success: true,
+      data: { isRegistered },
+    };
+
+    res.json(response);
+  });
+
+  /**
+   * POST /api/switch-role
+   * Switch user role between client and executor
+   */
+  switchRole = asyncHandler(async (req: AuthRequest, res: Response) => {
+    if (!req.user) {
+      throw new AppError(ErrorCode.UNAUTHORIZED, 'Authentication required', 401);
+    }
+
+    const { newRole } = req.body;
+
+    if (newRole !== 'client' && newRole !== 'executor') {
+      throw new AppError(ErrorCode.VALIDATION_ERROR, 'Invalid role', 400);
+    }
+
+    // Check if user is registered in the new role
+    let isRegistered = false;
+
+    if (newRole === 'client') {
+      const result = await pool.query(
+        'SELECT id FROM client_profiles WHERE user_id = $1',
+        [req.user.id]
+      );
+      isRegistered = result.rows.length > 0;
+    } else if (newRole === 'executor') {
+      const result = await pool.query(
+        'SELECT id FROM executor_profiles WHERE user_id = $1',
+        [req.user.id]
+      );
+      isRegistered = result.rows.length > 0;
+    }
+
+    if (!isRegistered) {
+      throw new AppError(
+        ErrorCode.NOT_REGISTERED,
+        `User is not registered as ${newRole}`,
+        400
+      );
+    }
+
+    // Update user role
+    await pool.query('UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2', [
+      newRole,
+      req.user.id,
+    ]);
+
+    // Get updated user with profile
+    const user = await userService.getUserWithProfile(req.user.id);
+
+    // Generate new JWT token with updated role
+    const jwt = require('jsonwebtoken');
+    const token = jwt.sign(
+      {
+        id: user.id,
+        phoneNumber: user.phone_number,
+        role: newRole,
+      },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: process.env.JWT_EXPIRES_IN || '15m' }
+    );
+
+    const response: APIResponse = {
+      success: true,
+      data: {
+        token,
+        user,
+      },
     };
 
     res.json(response);

@@ -50,6 +50,9 @@ app.use('/api/orders', orderRoutes);
 // Profile routes
 app.use('/api/profile', profileRoutes);
 
+// Account management routes (direct access)
+app.use('/api', profileRoutes);
+
 // Executor routes
 app.use('/api/executor', executorRoutes);
 
