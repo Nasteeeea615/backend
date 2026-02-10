@@ -3,12 +3,14 @@ import { Payment } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { io } from '../index';
 import notificationService from './notificationService';
+import yookassaService from './yookassaService';
+import { v4 as uuidv4 } from 'uuid';
 
 class PaymentService {
   /**
    * Create payment for order
    */
-  async createPayment(orderId: string, clientId: string, paymentMethod: any): Promise<Payment> {
+  async createPayment(orderId: string, clientId: string, paymentMethod: any): Promise<any> {
     // Get order details
     const orderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
 
@@ -30,29 +32,75 @@ class PaymentService {
 
     // Check if payment already exists
     const existingPayment = await pool.query(
-      'SELECT * FROM payments WHERE order_id = $1 AND status = $2',
-      [orderId, 'completed']
+      'SELECT * FROM payments WHERE order_id = $1 AND status IN ($2, $3)',
+      [orderId, 'completed', 'pending']
     );
 
     if (existingPayment.rows.length > 0) {
-      throw new AppError('PAYMENT_ALREADY_EXISTS', 'Order has already been paid', 400);
+      const existing = existingPayment.rows[0];
+      if (existing.status === 'completed') {
+        throw new AppError('PAYMENT_ALREADY_EXISTS', 'Order has already been paid', 400);
+      }
+      // Return existing pending payment
+      return {
+        payment: existing,
+        confirmation_url: existing.confirmation_url,
+      };
     }
 
-    // Create payment record
+    const idempotencyKey = uuidv4();
+
+    // Create payment record in database first
     const result = await pool.query(
-      `INSERT INTO payments (order_id, client_id, amount, status, payment_method)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO payments (
+        order_id, client_id, amount, status, payment_method,
+        idempotency_key, yookassa_payment_id, yookassa_status
+      )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [orderId, clientId, order.price, 'pending', JSON.stringify(paymentMethod)]
+      [orderId, clientId, order.price, 'pending', JSON.stringify(paymentMethod), idempotencyKey, null, null]
     );
 
     const payment = result.rows[0];
 
-    // In production, integrate with payment gateway (YooKassa/Stripe)
-    // For now, simulate successful payment
-    await this.processPayment(payment.id);
+    // Create payment in YooKassa
+    try {
+      const yookassaPayment = await yookassaService.createPayment({
+        amount: order.price,
+        description: `Оплата заказа #${orderId.substring(0, 8)}`,
+        orderId: orderId,
+        metadata: {
+          payment_id: payment.id,
+          client_id: clientId,
+        },
+      });
 
-    return payment;
+      // Update payment with YooKassa data
+      await pool.query(
+        `UPDATE payments 
+         SET yookassa_payment_id = $1, 
+             yookassa_status = $2,
+             confirmation_url = $3
+         WHERE id = $4`,
+        [yookassaPayment.id, yookassaPayment.status, yookassaPayment.confirmation.confirmation_url, payment.id]
+      );
+
+      return {
+        payment: {
+          ...payment,
+          yookassa_payment_id: yookassaPayment.id,
+          confirmation_url: yookassaPayment.confirmation.confirmation_url,
+        },
+        confirmation_url: yookassaPayment.confirmation.confirmation_url,
+      };
+    } catch (error: any) {
+      // Mark payment as failed
+      await pool.query(
+        `UPDATE payments SET status = $1, error_message = $2 WHERE id = $3`,
+        ['failed', (error as Error).message, payment.id]
+      );
+      throw error;
+    }
   }
 
   /**
@@ -103,6 +151,122 @@ class PaymentService {
         message: 'Клиент оплатил заказ',
       });
     }
+  }
+
+  /**
+   * Process webhook from YooKassa
+   */
+  async processWebhook(webhookData: any): Promise<void> {
+    const { type, object } = webhookData;
+
+    if (type === 'payment.succeeded') {
+      await this.handlePaymentSuccess(object);
+    } else if (type === 'payment.canceled') {
+      await this.handlePaymentFailed(object);
+    } else if (type === 'refund.succeeded') {
+      await this.handleRefundSuccess(object);
+    }
+  }
+
+  /**
+   * Handle successful payment from YooKassa
+   */
+  private async handlePaymentSuccess(paymentData: any): Promise<void> {
+    const yookassaPaymentId = paymentData.id;
+
+    // Find payment by YooKassa ID
+    const result = await pool.query(
+      'SELECT * FROM payments WHERE yookassa_payment_id = $1',
+      [yookassaPaymentId]
+    );
+
+    if (result.rows.length === 0) {
+      throw new AppError('PAYMENT_NOT_FOUND', 'Payment not found', 404);
+    }
+
+    const payment = result.rows[0];
+
+    // Update payment status
+    await pool.query(
+      `UPDATE payments 
+       SET status = 'completed', 
+           yookassa_status = $1,
+           transaction_id = $2,
+           completed_at = NOW()
+       WHERE id = $3`,
+      [paymentData.status, yookassaPaymentId, payment.id]
+    );
+
+    // Get order details
+    const orderResult = await pool.query(
+      `SELECT p.*, o.client_id, o.executor_id 
+       FROM payments p
+       JOIN orders o ON p.order_id = o.id
+       WHERE p.id = $1`,
+      [payment.id]
+    );
+
+    const updatedPayment = orderResult.rows[0];
+
+    // Send notifications
+    await notificationService.notifyPaymentSuccess(
+      updatedPayment.client_id,
+      updatedPayment.order_id,
+      updatedPayment.amount
+    );
+
+    if (updatedPayment.executor_id) {
+      await notificationService.notifyPaymentSuccess(
+        updatedPayment.executor_id,
+        updatedPayment.order_id,
+        updatedPayment.amount
+      );
+    }
+
+    // Send WebSocket notifications
+    io.emit(`client:${updatedPayment.client_id}`, {
+      type: 'payment:success',
+      paymentId: payment.id,
+      message: 'Оплата прошла успешно',
+    });
+
+    if (updatedPayment.executor_id) {
+      io.emit(`executor:${updatedPayment.executor_id}`, {
+        type: 'payment:received',
+        paymentId: payment.id,
+        message: 'Клиент оплатил заказ',
+      });
+    }
+  }
+
+  /**
+   * Handle failed payment from YooKassa
+   */
+  private async handlePaymentFailed(paymentData: any): Promise<void> {
+    const yookassaPaymentId = paymentData.id;
+
+    await pool.query(
+      `UPDATE payments 
+       SET status = 'failed',
+           yookassa_status = $1,
+           error_message = $2
+       WHERE yookassa_payment_id = $3`,
+      [paymentData.status, paymentData.cancellation_details?.reason || 'Payment canceled', yookassaPaymentId]
+    );
+  }
+
+  /**
+   * Handle successful refund from YooKassa
+   */
+  private async handleRefundSuccess(refundData: any): Promise<void> {
+    const yookassaPaymentId = refundData.payment_id;
+
+    await pool.query(
+      `UPDATE payments 
+       SET status = 'refunded'
+       WHERE yookassa_payment_id = $1`,
+      [yookassaPaymentId]
+    );
   }
 
   /**

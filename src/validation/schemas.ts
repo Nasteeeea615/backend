@@ -13,14 +13,6 @@ export const phoneNumberSchema = Joi.string()
     'any.required': 'Номер телефона обязателен',
   });
 
-export const smsCodeSchema = Joi.string()
-  .pattern(/^[0-9]{4,6}$/)
-  .required()
-  .messages({
-    'string.pattern.base': 'Код должен содержать 4-6 цифр',
-    'any.required': 'Код подтверждения обязателен',
-  });
-
 export const nameSchema = Joi.string()
   .min(2)
   .max(100)
@@ -40,15 +32,6 @@ export const uuidSchema = Joi.string()
   });
 
 // Authentication schemas
-export const sendSmsSchema = Joi.object({
-  phoneNumber: phoneNumberSchema,
-});
-
-export const verifySmsSchema = Joi.object({
-  phoneNumber: phoneNumberSchema,
-  code: smsCodeSchema,
-});
-
 export const registerClientSchema = Joi.object({
   phoneNumber: phoneNumberSchema,
   name: nameSchema,

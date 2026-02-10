@@ -5,6 +5,7 @@ import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { errorHandler } from './middleware/errorHandler';
 import pool from './config/database';
+import { validateEnvironment } from './utils/validateEnv';
 import authRoutes from './routes/authRoutes';
 import orderRoutes from './routes/orderRoutes';
 import profileRoutes from './routes/profileRoutes';
@@ -12,8 +13,12 @@ import executorRoutes from './routes/executorRoutes';
 import notificationRoutes from './routes/notificationRoutes';
 import supportRoutes from './routes/supportRoutes';
 import adminRoutes from './routes/adminRoutes';
+import webhookRoutes from './routes/webhookRoutes';
 
 dotenv.config();
+
+// Validate environment variables
+validateEnvironment();
 
 const app: Application = express();
 const httpServer = createServer(app);
@@ -32,8 +37,34 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check endpoint
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', message: 'Server is running' });
+app.get('/health', async (_req, res) => {
+  try {
+    // Check database connection
+    await pool.query('SELECT NOW()');
+    
+    // Check Firebase status
+    const firebaseStatus = (await import('./services/notificationService')).default.getStatus();
+    
+    // Check YooKassa status
+    const yookassaStatus = (await import('./services/yookassaService')).default.isConfigured();
+    
+    res.json({ 
+      status: 'ok', 
+      message: 'Server is running',
+      timestamp: new Date().toISOString(),
+      services: {
+        database: 'connected',
+        firebase: firebaseStatus.initialized ? 'initialized' : 'not_configured',
+        yookassa: yookassaStatus ? 'configured' : 'not_configured',
+      }
+    });
+  } catch (error: any) {
+    res.status(503).json({
+      status: 'error',
+      message: 'Service unavailable',
+      error: error.message,
+    });
+  }
 });
 
 // API routes
@@ -64,6 +95,9 @@ app.use('/api/support', supportRoutes);
 
 // Admin routes
 app.use('/api/admin', adminRoutes);
+
+// Webhook routes (no auth required)
+app.use('/api/webhooks', webhookRoutes);
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {

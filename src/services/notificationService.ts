@@ -1,25 +1,52 @@
 import admin from 'firebase-admin';
 import pool from '../config/database';
+import logger from '../utils/logger';
 
 // Initialize Firebase Admin SDK
 // Note: In production, use service account credentials from environment
-if (!admin.apps.length) {
+let firebaseInitialized = false;
+
+function initializeFirebase(): boolean {
+  if (admin.apps.length > 0) {
+    firebaseInitialized = true;
+    return true;
+  }
+
   try {
     const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT 
       ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
       : null;
 
-    if (serviceAccount) {
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-      });
-    } else {
-      console.warn('Firebase Admin SDK not initialized: FIREBASE_SERVICE_ACCOUNT not found');
+    if (!serviceAccount) {
+      logger.warn('Firebase Admin SDK not initialized: FIREBASE_SERVICE_ACCOUNT not found in environment');
+      logger.warn('Push notifications will not work. Please add FIREBASE_SERVICE_ACCOUNT to .env');
+      return false;
     }
-  } catch (error) {
-    console.error('Error initializing Firebase Admin SDK:', error);
+
+    // Validate service account structure
+    if (!serviceAccount.project_id || !serviceAccount.private_key || !serviceAccount.client_email) {
+      logger.error('Invalid Firebase service account structure');
+      return false;
+    }
+
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+    });
+
+    firebaseInitialized = true;
+    logger.info('✅ Firebase Admin SDK initialized successfully');
+    return true;
+  } catch (error: any) {
+    logger.error('❌ Error initializing Firebase Admin SDK:', {
+      error: error.message,
+      stack: error.stack,
+    });
+    return false;
   }
 }
+
+// Try to initialize on module load
+initializeFirebase();
 
 export interface NotificationPayload {
   userId: string;
@@ -139,20 +166,23 @@ class NotificationService {
     const { userId, title, body, data } = payload;
 
     try {
-      // Save notification to database
+      // Save notification to database (always save, even if push fails)
       const notificationId = await this.saveNotification(payload);
+
+      // Check if Firebase is initialized
+      if (!firebaseInitialized) {
+        logger.warn('Firebase not initialized, skipping push notification', {
+          userId,
+          type: payload.type,
+        });
+        return;
+      }
 
       // Get user's FCM tokens
       const tokens = await this.getUserTokens(userId);
 
       if (tokens.length === 0) {
-        console.log(`No active FCM tokens found for user ${userId}`);
-        return;
-      }
-
-      // Check if Firebase Admin is initialized
-      if (!admin.apps.length) {
-        console.warn('Firebase Admin SDK not initialized, skipping push notification');
+        logger.debug(`No active FCM tokens found for user ${userId}`);
         return;
       }
 
@@ -179,7 +209,9 @@ class NotificationService {
         response.responses.forEach((resp, idx) => {
           if (!resp.success) {
             failedTokens.push(tokens[idx]);
-            console.error(`Failed to send to token ${tokens[idx]}:`, resp.error);
+            logger.error(`Failed to send to token ${tokens[idx]}:`, {
+              error: resp.error?.message,
+            });
           }
         });
 
@@ -189,10 +221,18 @@ class NotificationService {
         }
       }
 
-      console.log(`Push notification sent to user ${userId}: ${response.successCount} success, ${response.failureCount} failure`);
-    } catch (error) {
-      console.error('Error sending push notification:', error);
-      throw error;
+      logger.info(`Push notification sent to user ${userId}`, {
+        type: payload.type,
+        successCount: response.successCount,
+        failureCount: response.failureCount,
+      });
+    } catch (error: any) {
+      logger.error('Error sending push notification:', {
+        error: error.message,
+        userId,
+        type: payload.type,
+      });
+      // Don't throw - we don't want to break the flow if push fails
     }
   }
 
@@ -347,6 +387,29 @@ class NotificationService {
       console.error('Error marking all notifications as read:', error);
       throw error;
     }
+  }
+
+  /**
+   * Check if Firebase is initialized and ready
+   */
+  isFirebaseInitialized(): boolean {
+    return firebaseInitialized;
+  }
+
+  /**
+   * Get Firebase initialization status for health checks
+   */
+  getStatus(): { initialized: boolean; message: string } {
+    if (firebaseInitialized) {
+      return {
+        initialized: true,
+        message: 'Firebase Admin SDK is initialized and ready',
+      };
+    }
+    return {
+      initialized: false,
+      message: 'Firebase Admin SDK is not initialized. Push notifications will not work.',
+    };
   }
 }
 

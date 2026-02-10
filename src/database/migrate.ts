@@ -1,26 +1,37 @@
-import fs from 'fs';
-import path from 'path';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import pool from '../config/database';
 
-const migrationsDir = path.join(__dirname, 'migrations');
-
+/**
+ * Run database migrations
+ */
 async function runMigrations() {
+  console.log('🔄 Running database migrations...\n');
+
+  const migrations = [
+    '001_initial_schema.sql',
+    '002_add_indexes.sql',
+    '003_add_yookassa_fields.sql',
+  ];
+
   try {
-    console.log('🔄 Starting database migrations...');
-
-    // Get all migration files
-    const files = fs
-      .readdirSync(migrationsDir)
-      .filter(file => file.endsWith('.sql'))
-      .sort();
-
-    for (const file of files) {
-      console.log(`📝 Running migration: ${file}`);
-      const filePath = path.join(migrationsDir, file);
-      const sql = fs.readFileSync(filePath, 'utf8');
-
-      await pool.query(sql);
-      console.log(`✅ Migration completed: ${file}`);
+    for (const migration of migrations) {
+      const migrationPath = join(__dirname, 'migrations', migration);
+      
+      try {
+        const sql = readFileSync(migrationPath, 'utf-8');
+        
+        console.log(`📝 Running migration: ${migration}`);
+        await pool.query(sql);
+        console.log(`✅ Migration completed: ${migration}\n`);
+      } catch (error: any) {
+        if (error.code === 'ENOENT') {
+          console.log(`⚠️  Migration file not found: ${migration} (skipping)\n`);
+        } else {
+          console.error(`❌ Error in migration ${migration}:`, error.message);
+          throw error;
+        }
+      }
     }
 
     console.log('✅ All migrations completed successfully!');

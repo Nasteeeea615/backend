@@ -2,6 +2,9 @@ import { Request, Response, NextFunction } from 'express';
 import { AppError, ErrorCode } from '../types/errors';
 import logger from '../utils/logger';
 
+// Re-export AppError for convenience
+export { AppError } from '../types/errors';
+
 /**
  * Интерфейс ответа с ошибкой
  */

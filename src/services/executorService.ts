@@ -27,6 +27,7 @@ class ExecutorService {
 
   /**
    * Get available orders for executor based on vehicle capacity
+   * Returns limited info (no street/house_number) for privacy
    */
   async getAvailableOrders(executorId: string): Promise<Order[]> {
     // Get executor's vehicle capacity
@@ -42,11 +43,19 @@ class ExecutorService {
     const vehicleCapacity = executorResult.rows[0].vehicle_capacity;
 
     // Get available orders matching vehicle capacity
+    // Only show city, date, time, and price - hide exact address for privacy
     const result = await pool.query(
-      `SELECT o.*, 
-        json_build_object('id', c.id, 'name', c.name, 'phone_number', c.phone_number) as client
+      `SELECT 
+        o.id,
+        o.vehicle_capacity,
+        o.city,
+        o.scheduled_date,
+        o.scheduled_time,
+        o.is_urgent,
+        o.price,
+        o.created_at,
+        o.status
        FROM orders o
-       JOIN users c ON o.client_id = c.id
        WHERE o.status = 'pending'
          AND o.vehicle_capacity = $1
        ORDER BY o.is_urgent DESC, o.created_at ASC`,
@@ -57,7 +66,7 @@ class ExecutorService {
   }
 
   /**
-   * Accept order
+   * Accept order - returns full order details including address
    */
   async acceptOrder(executorId: string, orderId: string): Promise<Order> {
     const client = await pool.connect();
@@ -74,7 +83,7 @@ class ExecutorService {
         throw new AppError('ORDER_NOT_AVAILABLE', 'Order is no longer available', 400);
       }
 
-      // Update order status
+      // Update order status and return full details including address
       const result = await client.query(
         `UPDATE orders 
          SET executor_id = $1, status = 'in_progress', accepted_at = NOW()

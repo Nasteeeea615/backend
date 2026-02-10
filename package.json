@@ -12,12 +12,16 @@
     "db:setup": "npm run migrate && npm run seed",
     "db:reset": "ts-node src/database/reset.ts",
     "db:refresh": "npm run db:reset && npm run db:setup",
+    "health": "curl http://localhost:3000/health",
+    "logs": "tail -f combined.log",
+    "logs:error": "tail -f error.log",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@types/uuid": "^10.0.0",
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
@@ -34,6 +38,7 @@
     "pg": "^8.16.3",
     "redis": "^5.9.0",
     "socket.io": "^4.8.1",
+    "uuid": "^13.0.0",
     "winston": "^3.18.3",
     "xss-clean": "^0.1.4"
   },
