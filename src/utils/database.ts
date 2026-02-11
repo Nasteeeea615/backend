@@ -1,4 +1,4 @@
-import { Pool, QueryResult } from 'pg';
+import { Pool, QueryResult, QueryResultRow } from 'pg';
 import logger from './logger';
 
 /**
@@ -56,7 +56,7 @@ export const getPool = (): Pool => {
  * Безопасное выполнение запроса с параметрами
  * ВСЕГДА используйте параметризованные запросы!
  */
-export const query = async <T extends any = any>(
+export const query = async <T extends QueryResultRow = any>(
   text: string,
   params?: any[]
 ): Promise<QueryResult<T>> => {

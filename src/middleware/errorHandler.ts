@@ -9,7 +9,7 @@ export { AppError } from '../types/errors';
  * Интерфейс ответа с ошибкой
  */
 interface ErrorResponse {
-  code: ErrorCode;
+  code: string;
   message: string;
   details?: any;
   stack?: string;

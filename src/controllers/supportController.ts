@@ -24,13 +24,13 @@ export const createTicket = async (req: AuthRequest, res: Response) => {
 
     const ticket = await supportService.createTicket(userId, subject, description);
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       ticket,
     });
   } catch (error) {
     console.error('Error in createTicket:', error);
-    res.status(500).json({ error: 'Failed to create ticket' });
+    return res.status(500).json({ error: 'Failed to create ticket' });
   }
 };
 
@@ -47,13 +47,13 @@ export const getUserTickets = async (req: AuthRequest, res: Response) => {
 
     const tickets = await supportService.getUserTickets(userId);
 
-    res.json({
+    return res.json({
       success: true,
       tickets,
     });
   } catch (error) {
     console.error('Error in getUserTickets:', error);
-    res.status(500).json({ error: 'Failed to fetch tickets' });
+    return res.status(500).json({ error: 'Failed to fetch tickets' });
   }
 };
 
@@ -63,7 +63,7 @@ export const getUserTickets = async (req: AuthRequest, res: Response) => {
 export const getTicketMessages = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
-    const { ticketId } = req.params;
+    const ticketId = Array.isArray(req.params.ticketId) ? req.params.ticketId[0] : (req.params.ticketId || '');
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -75,7 +75,7 @@ export const getTicketMessages = async (req: AuthRequest, res: Response) => {
 
     const messages = await supportService.getTicketMessages(ticketId, userId);
 
-    res.json({
+    return res.json({
       success: true,
       messages,
     });
@@ -84,7 +84,7 @@ export const getTicketMessages = async (req: AuthRequest, res: Response) => {
     if (error.code === 'TICKET_NOT_FOUND') {
       return res.status(404).json({ error: error.message });
     }
-    res.status(500).json({ error: 'Failed to fetch messages' });
+    return res.status(500).json({ error: 'Failed to fetch messages' });
   }
 };
 
@@ -94,7 +94,7 @@ export const getTicketMessages = async (req: AuthRequest, res: Response) => {
 export const addUserMessage = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
-    const { ticketId } = req.params;
+    const ticketId = Array.isArray(req.params.ticketId) ? req.params.ticketId[0] : (req.params.ticketId || '');
     const { content } = req.body;
 
     if (!userId) {
@@ -117,7 +117,7 @@ export const addUserMessage = async (req: AuthRequest, res: Response) => {
 
     const message = await supportService.addMessage(ticketId, userId, 'user', content);
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message,
     });
@@ -126,7 +126,7 @@ export const addUserMessage = async (req: AuthRequest, res: Response) => {
     if (error.code === 'TICKET_NOT_FOUND') {
       return res.status(404).json({ error: error.message });
     }
-    res.status(500).json({ error: 'Failed to add message' });
+    return res.status(500).json({ error: 'Failed to add message' });
   }
 };
 
@@ -145,7 +145,7 @@ export const getAllTickets = async (req: AuthRequest, res: Response) => {
 
     const result = await supportService.getAllTickets(filters);
 
-    res.json({
+    return res.json({
       success: true,
       tickets: result.tickets,
       total: result.total,
@@ -154,7 +154,7 @@ export const getAllTickets = async (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     console.error('Error in getAllTickets:', error);
-    res.status(500).json({ error: 'Failed to fetch tickets' });
+    return res.status(500).json({ error: 'Failed to fetch tickets' });
   }
 };
 
@@ -163,7 +163,7 @@ export const getAllTickets = async (req: AuthRequest, res: Response) => {
  */
 export const getTicketDetails = async (req: AuthRequest, res: Response) => {
   try {
-    const { ticketId } = req.params;
+    const ticketId = Array.isArray(req.params.ticketId) ? req.params.ticketId[0] : (req.params.ticketId || '');
 
     if (!ticketId) {
       return res.status(400).json({ error: 'Ticket ID is required' });
@@ -171,7 +171,7 @@ export const getTicketDetails = async (req: AuthRequest, res: Response) => {
 
     const ticket = await supportService.getTicketDetails(ticketId);
 
-    res.json({
+    return res.json({
       success: true,
       ticket,
     });
@@ -180,7 +180,7 @@ export const getTicketDetails = async (req: AuthRequest, res: Response) => {
     if (error.code === 'TICKET_NOT_FOUND') {
       return res.status(404).json({ error: error.message });
     }
-    res.status(500).json({ error: 'Failed to fetch ticket details' });
+    return res.status(500).json({ error: 'Failed to fetch ticket details' });
   }
 };
 
@@ -190,7 +190,7 @@ export const getTicketDetails = async (req: AuthRequest, res: Response) => {
 export const replyToTicket = async (req: AuthRequest, res: Response) => {
   try {
     const adminId = req.user?.id;
-    const { ticketId } = req.params;
+    const ticketId = Array.isArray(req.params.ticketId) ? req.params.ticketId[0] : (req.params.ticketId || '');
     const { content } = req.body;
 
     if (!adminId) {
@@ -207,7 +207,7 @@ export const replyToTicket = async (req: AuthRequest, res: Response) => {
 
     const message = await supportService.addMessage(ticketId, adminId, 'admin', content);
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message,
     });
@@ -216,7 +216,7 @@ export const replyToTicket = async (req: AuthRequest, res: Response) => {
     if (error.code === 'TICKET_NOT_FOUND') {
       return res.status(404).json({ error: error.message });
     }
-    res.status(500).json({ error: 'Failed to reply to ticket' });
+    return res.status(500).json({ error: 'Failed to reply to ticket' });
   }
 };
 
@@ -225,7 +225,7 @@ export const replyToTicket = async (req: AuthRequest, res: Response) => {
  */
 export const updateTicketStatus = async (req: AuthRequest, res: Response) => {
   try {
-    const { ticketId } = req.params;
+    const ticketId = Array.isArray(req.params.ticketId) ? req.params.ticketId[0] : (req.params.ticketId || '');
     const { status } = req.body;
 
     if (!ticketId) {
@@ -238,7 +238,7 @@ export const updateTicketStatus = async (req: AuthRequest, res: Response) => {
 
     const ticket = await supportService.updateTicketStatus(ticketId, status);
 
-    res.json({
+    return res.json({
       success: true,
       ticket,
     });
@@ -247,6 +247,6 @@ export const updateTicketStatus = async (req: AuthRequest, res: Response) => {
     if (error.code === 'TICKET_NOT_FOUND') {
       return res.status(404).json({ error: error.message });
     }
-    res.status(500).json({ error: 'Failed to update ticket status' });
+    return res.status(500).json({ error: 'Failed to update ticket status' });
   }
 };

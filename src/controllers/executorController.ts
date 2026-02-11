@@ -70,7 +70,7 @@ class ExecutorController {
       throw new AppError('UNAUTHORIZED', 'Authentication required', 401);
     }
 
-    const { id } = req.params;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id || '');
     const order = await executorService.acceptOrder(req.user.id, id);
 
     const response: APIResponse = {
@@ -90,7 +90,7 @@ class ExecutorController {
       throw new AppError('UNAUTHORIZED', 'Authentication required', 401);
     }
 
-    const { id } = req.params;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id || '');
     const order = await executorService.completeOrder(req.user.id, id);
 
     const response: APIResponse = {

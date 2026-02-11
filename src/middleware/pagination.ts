@@ -29,7 +29,7 @@ export interface PaginatedResult<T> {
  */
 export const paginationMiddleware = (
   req: Request,
-  res: Response,
+  _res: Response,
   next: NextFunction
 ) => {
   const page = Math.max(1, parseInt(req.query.page as string) || 1);

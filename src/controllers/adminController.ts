@@ -103,7 +103,7 @@ class AdminController {
    * Update order
    */
   updateOrder = asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id || '');
     const { status, executor_id } = req.body;
 
     // Verify order exists
@@ -156,7 +156,7 @@ class AdminController {
    * Assign executor to order
    */
   assignExecutor = asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id || '');
     const { executor_id } = req.body;
 
     if (!executor_id) {
@@ -271,7 +271,7 @@ class AdminController {
    * Get user details
    */
   getUserDetails = asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id || '');
 
     const user = await userService.findById(id);
     if (!user) {
@@ -306,7 +306,7 @@ class AdminController {
    * Block or unblock user
    */
   toggleBlockUser = asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id || '');
     const { isBlocked } = req.body;
 
     if (typeof isBlocked !== 'boolean') {
@@ -335,7 +335,7 @@ class AdminController {
    * Verify executor
    */
   verifyExecutor = asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id || '');
     const { isVerified } = req.body;
 
     if (typeof isVerified !== 'boolean') {
@@ -464,7 +464,7 @@ class AdminController {
    * Refund payment
    */
   refundPayment = asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id || '');
 
     const payment = await paymentService.refundPayment(id);
 
@@ -548,7 +548,7 @@ class AdminController {
       throw new AppError('UNAUTHORIZED', 'Authentication required', 401);
     }
 
-    const { id } = req.params;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id || '');
     const { content } = req.body;
 
     if (!content) {
@@ -570,7 +570,7 @@ class AdminController {
    * Update ticket status
    */
   updateTicketStatus = asyncHandler(async (req: AuthRequest, res: Response) => {
-    const { id } = req.params;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id || '');
     const { status } = req.body;
 
     if (!status || !['open', 'in_progress', 'closed'].includes(status)) {

@@ -6,7 +6,7 @@ import { ValidationError } from '../types/errors';
  * Middleware для валидации данных запроса с помощью Joi
  */
 export const validate = (schema: Joi.ObjectSchema, property: 'body' | 'query' | 'params' = 'body') => {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return (req: Request, _res: Response, next: NextFunction) => {
     const { error, value } = schema.validate(req[property], {
       abortEarly: false, // Показывать все ошибки, а не только первую
       stripUnknown: true, // Удалять неизвестные поля

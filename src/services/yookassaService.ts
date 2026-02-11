@@ -1,5 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
-import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 import { AppError } from '../middleware/errorHandler';
 import logger from '../utils/logger';
 
@@ -110,7 +110,7 @@ class YooKassaService {
    * Create payment for order
    */
   async createPayment(params: CreatePaymentParams): Promise<PaymentResponse> {
-    const idempotencyKey = uuidv4();
+    const idempotencyKey = (crypto as any).randomUUID ? (crypto as any).randomUUID() : crypto.randomBytes(16).toString('hex');
 
     try {
       const response = await this.client.post<PaymentResponse>(
@@ -184,7 +184,7 @@ class YooKassaService {
    * Create refund
    */
   async createRefund(params: RefundParams): Promise<any> {
-    const idempotencyKey = uuidv4();
+    const idempotencyKey = (crypto as any).randomUUID ? (crypto as any).randomUUID() : crypto.randomBytes(16).toString('hex');
 
     try {
       const refundData: any = {
@@ -229,7 +229,7 @@ class YooKassaService {
    * Create payout for executor withdrawal
    */
   async createPayout(params: PayoutParams): Promise<any> {
-    const idempotencyKey = uuidv4();
+    const idempotencyKey = (crypto as any).randomUUID ? (crypto as any).randomUUID() : crypto.randomBytes(16).toString('hex');
 
     try {
       const response = await this.client.post(
@@ -269,11 +269,37 @@ class YooKassaService {
   /**
    * Verify webhook signature
    */
-  verifyWebhookSignature(_payload: string, _signature: string): boolean {
-    // YooKassa doesn't use signature verification in the same way
-    // Instead, we should verify by making a GET request to confirm the payment
-    // For now, we'll implement basic validation
-    return true; // TODO: Implement proper signature verification
+  async verifyWebhookSignature(payload: string, signature?: string): Promise<boolean> {
+    // If secret not configured, reject
+    if (!this.config.secretKey) return false;
+
+    // If signature header provided, verify HMAC SHA256
+    if (signature) {
+      try {
+        const expected = crypto.createHmac('sha256', this.config.secretKey).update(payload).digest('hex');
+        // Use timing-safe comparison
+        const sigBuf = Buffer.from(signature);
+        const expBuf = Buffer.from(expected);
+        if (sigBuf.length !== expBuf.length) return false;
+        return crypto.timingSafeEqual(sigBuf, expBuf);
+      } catch (e) {
+        logger.error('Error verifying webhook signature', { error: (e as Error).message });
+        return false;
+      }
+    }
+
+    // Fallback: verify by fetching payment status from YooKassa using payment id in payload
+    try {
+      const parsed = JSON.parse(payload);
+      const paymentId = parsed?.object?.id || parsed?.object_id || parsed?.id;
+      if (!paymentId) return false;
+
+      const status = await this.getPaymentStatus(paymentId);
+      return !!status && !!status.id;
+    } catch (e) {
+      logger.warn('Could not verify webhook via fallback', { error: (e as Error).message });
+      return false;
+    }
   }
 
   /**

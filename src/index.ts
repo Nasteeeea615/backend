@@ -33,7 +33,18 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+
+// Capture raw body for webhook signature verification
+app.use(express.json({
+  verify: (req: any, _res, buf: Buffer) => {
+    try {
+      req.rawBody = buf.toString();
+    } catch (e) {
+      req.rawBody = undefined;
+    }
+  }
+}));
+
 app.use(express.urlencoded({ extended: true }));
 
 // Health check endpoint

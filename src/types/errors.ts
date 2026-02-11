@@ -79,13 +79,13 @@ export enum ErrorCode {
  * Базовый класс для ошибок приложения
  */
 export class AppError extends Error {
-  public readonly code: ErrorCode;
+  public readonly code: string;
   public readonly statusCode: number;
   public readonly isOperational: boolean;
   public readonly details?: any;
 
   constructor(
-    code: ErrorCode,
+    code: string,
     message: string,
     statusCode: number = 500,
     isOperational: boolean = true,

@@ -26,10 +26,10 @@ export const saveFCMToken = async (req: AuthRequest, res: Response) => {
       deviceId,
     });
 
-    res.json({ success: true, message: 'FCM token saved successfully' });
+    return res.json({ success: true, message: 'FCM token saved successfully' });
   } catch (error) {
     console.error('Error in saveFCMToken:', error);
-    res.status(500).json({ error: 'Failed to save FCM token' });
+    return res.status(500).json({ error: 'Failed to save FCM token' });
   }
 };
 
@@ -48,10 +48,10 @@ export const removeFCMToken = async (req: AuthRequest, res: Response) => {
 
     await notificationService.removeFCMToken(userId, token);
 
-    res.json({ success: true, message: 'FCM token removed successfully' });
+    return res.json({ success: true, message: 'FCM token removed successfully' });
   } catch (error) {
     console.error('Error in removeFCMToken:', error);
-    res.status(500).json({ error: 'Failed to remove FCM token' });
+    return res.status(500).json({ error: 'Failed to remove FCM token' });
   }
 };
 
@@ -66,17 +66,17 @@ export const getNotifications = async (req: AuthRequest, res: Response) => {
 
     const notifications = await notificationService.getUserNotifications(userId, limit);
 
-    res.json({ notifications });
+    return res.json({ notifications });
   } catch (error) {
     console.error('Error in getNotifications:', error);
-    res.status(500).json({ error: 'Failed to get notifications' });
+    return res.status(500).json({ error: 'Failed to get notifications' });
   }
 };
 
 export const markNotificationAsRead = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
-    const { notificationId } = req.params;
+    const notificationId = Array.isArray(req.params.notificationId) ? req.params.notificationId[0] : (req.params.notificationId || '');
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -88,10 +88,10 @@ export const markNotificationAsRead = async (req: AuthRequest, res: Response) =>
 
     await notificationService.markAsRead(notificationId, userId);
 
-    res.json({ success: true, message: 'Notification marked as read' });
+    return res.json({ success: true, message: 'Notification marked as read' });
   } catch (error) {
     console.error('Error in markNotificationAsRead:', error);
-    res.status(500).json({ error: 'Failed to mark notification as read' });
+    return res.status(500).json({ error: 'Failed to mark notification as read' });
   }
 };
 
@@ -105,9 +105,9 @@ export const markAllNotificationsAsRead = async (req: AuthRequest, res: Response
 
     await notificationService.markAllAsRead(userId);
 
-    res.json({ success: true, message: 'All notifications marked as read' });
+    return res.json({ success: true, message: 'All notifications marked as read' });
   } catch (error) {
     console.error('Error in markAllNotificationsAsRead:', error);
-    res.status(500).json({ error: 'Failed to mark all notifications as read' });
+    return res.status(500).json({ error: 'Failed to mark all notifications as read' });
   }
 };

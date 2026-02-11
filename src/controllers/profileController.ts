@@ -157,7 +157,7 @@ class ProfileController {
       throw new AppError(ErrorCode.UNAUTHORIZED, 'Authentication required', 401);
     }
 
-    const { role } = req.params;
+    const role = Array.isArray(req.params.role) ? req.params.role[0] : (req.params.role || '');
 
     if (role !== 'client' && role !== 'executor') {
       throw new AppError(ErrorCode.VALIDATION_ERROR, 'Invalid role', 400);

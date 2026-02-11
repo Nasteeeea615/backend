@@ -127,7 +127,7 @@ export const preventParameterPollution = hpp({
  * Input sanitization middleware
  * Очищает входные данные от потенциально опасного контента
  */
-export const sanitizeInput = (req: Request, res: Response, next: NextFunction) => {
+export const sanitizeInput = (req: Request, _res: Response, next: NextFunction) => {
   // Рекурсивная функция для очистки объектов
   const sanitize = (obj: any): any => {
     if (typeof obj === 'string') {

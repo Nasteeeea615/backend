@@ -8,9 +8,9 @@ WORKDIR /app
 # Копируем package files
 COPY package*.json ./
 
-# Устанавливаем зависимости
-RUN npm ci --only=production && \
-    npm cache clean --force
+# Устанавливаем все зависимости (нужны dev deps для сборки)
+RUN npm ci && \
+  npm cache clean --force
 
 # Копируем исходный код
 COPY . .
@@ -30,14 +30,12 @@ RUN addgroup -g 1001 -S nodejs && \
 
 WORKDIR /app
 
-# Копируем зависимости из builder
-COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
+# Копируем package files и устанавливаем только production зависимости
+COPY package*.json ./
+RUN npm ci --only=production && npm cache clean --force
 
-# Копируем скомпилированный код
+# Копируем скомпилированный код из билд-стадии
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
-
-# Копируем package.json для версии
-COPY --chown=nodejs:nodejs package.json ./
 
 # Переключаемся на непривилегированного пользователя
 USER nodejs
