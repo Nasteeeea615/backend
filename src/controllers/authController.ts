@@ -31,16 +31,24 @@ class AuthController {
     // Register client
     const user = await userService.registerClient(data);
 
-    // Generate token
-    const token = jwtService.generateToken({
-      userId: user.id,
-      role: user.role,
-    });
+    // Generate access token and set as HttpOnly cookie
+    const token = jwtService.generateToken({ userId: user.id, role: user.role });
+
+    // Cookie options
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict' as const,
+      path: '/',
+      // Set maxAge based on JWT_EXPIRES_IN (approximate)
+      maxAge: parseDurationToMs(process.env.JWT_EXPIRES_IN || '15m'),
+    };
+
+    res.cookie('access_token', token, cookieOptions);
 
     const response: APIResponse = {
       success: true,
       data: {
-        token,
         user: await userService.getUserWithProfile(user.id),
       },
     };
@@ -78,16 +86,22 @@ class AuthController {
     // Register executor
     const user = await userService.registerExecutor(data);
 
-    // Generate token
-    const token = jwtService.generateToken({
-      userId: user.id,
-      role: user.role,
-    });
+    // Generate access token and set as HttpOnly cookie
+    const token = jwtService.generateToken({ userId: user.id, role: user.role });
+
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict' as const,
+      path: '/',
+      maxAge: parseDurationToMs(process.env.JWT_EXPIRES_IN || '15m'),
+    };
+
+    res.cookie('access_token', token, cookieOptions);
 
     const response: APIResponse = {
       success: true,
       data: {
-        token,
         user: await userService.getUserWithProfile(user.id),
         message: 'Registration successful. Your account is pending verification.',
       },
@@ -101,8 +115,14 @@ class AuthController {
    * Logout user (client-side token removal)
    */
   logout = asyncHandler(async (_req: Request, res: Response) => {
-    // In JWT-based auth, logout is handled client-side by removing the token
-    // Here we just confirm the logout
+    // Clear the access_token cookie
+    res.clearCookie('access_token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/',
+    });
+
     const response: APIResponse = {
       success: true,
       data: { message: 'Logged out successfully' },
@@ -113,3 +133,25 @@ class AuthController {
 }
 
 export default new AuthController();
+
+/**
+ * Parse simple duration strings like '15m', '7d' to milliseconds.
+ */
+function parseDurationToMs(value: string): number {
+  const match = /^([0-9]+)\s*(s|m|h|d)?$/i.exec(value);
+  if (!match) return 0;
+  const n = parseInt(match[1], 10);
+  const unit = (match[2] || 'ms').toLowerCase();
+  switch (unit) {
+    case 's':
+      return n * 1000;
+    case 'm':
+      return n * 60 * 1000;
+    case 'h':
+      return n * 60 * 60 * 1000;
+    case 'd':
+      return n * 24 * 60 * 60 * 1000;
+    default:
+      return n;
+  }
+}

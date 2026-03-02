@@ -1,11 +1,24 @@
 import express, { Application } from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { errorHandler } from './middleware/errorHandler';
+
+import hpp from 'hpp';
 import pool from './config/database';
 import { validateEnvironment } from './utils/validateEnv';
+import {
+  helmetConfig,
+  sanitizeData,
+  sanitizeInput,
+  securityHeaders,
+  enforceHttps,
+} from './middleware/security';
+import { globalLimiter, apiLimiter } from './middleware/rateLimiter';
+import { corsMiddleware } from './middleware/cors';
+
+// @ts-ignore - untyped module
+import xss from 'xss-clean';
 import authRoutes from './routes/authRoutes';
 import orderRoutes from './routes/orderRoutes';
 import profileRoutes from './routes/profileRoutes';
@@ -32,7 +45,25 @@ const io = new SocketIOServer(httpServer, {
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(cors());
+// Enforce HTTPS in production (behind proxy/load balancer)
+app.use(enforceHttps);
+
+// Security headers and helmet
+app.use(helmetConfig);
+app.use(securityHeaders);
+
+// CORS with whitelist
+app.use(corsMiddleware);
+
+// Global rate limiting and API rate limiting
+app.use(globalLimiter);
+app.use('/api', apiLimiter);
+
+// Basic input sanitization and protections
+app.use(sanitizeData);
+app.use(xss());
+app.use(hpp());
+app.use(sanitizeInput);
 
 // Capture raw body for webhook signature verification
 app.use(express.json({

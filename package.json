@@ -16,8 +16,17 @@
     "db:refresh": "npm run db:reset && npm run db:setup",
     "health": "curl http://localhost:3000/health",
     "logs": "tail -f combined.log",
-    "logs:error": "tail -f error.log"
-    ,"e2e:staging": "node ./scripts/run-e2e.js"
+    "logs:error": "tail -f error.log",
+    "e2e:staging": "node ./scripts/run-e2e.js",
+    "validate-secrets": "node ./scripts/validate-secrets.js",
+    "rotate-secrets": "node ./scripts/rotate-secrets.js",
+    "generate-secrets": "node ./scripts/rotate-secrets.js --generate-initial",
+    "e2e": "node ./scripts/e2e-tests.js",
+    "staging:setup": "bash ./scripts/staging-setup.sh",
+    "staging:migrate": "bash ./scripts/migrate-with-backup.sh staging",
+    "production:migrate": "bash ./scripts/migrate-with-backup.sh production",
+    "deps:update": "node ./scripts/update-dependencies.ps1",
+    "deps:audit": "npm audit --audit-level=high"
   },
   "keywords": [],
   "author": "",
