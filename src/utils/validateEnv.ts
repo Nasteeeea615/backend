@@ -20,6 +20,13 @@ export function validateEnvironment(): void {
     'YOOKASSA_SECRET_KEY',
     'FIREBASE_SERVICE_ACCOUNT',
     'REDIS_HOST',
+    'REDIS_URL',
+    'SMTP_HOST',
+    'SMTP_PORT',
+    'SMTP_USER',
+    'SMTP_PASS',
+    'SMTP_FROM_EMAIL',
+    'LOGIN_CODE_TTL_MINUTES',
   ];
 
   const missing: string[] = [];
@@ -59,6 +66,13 @@ export function validateEnvironment(): void {
     if (notConfigured.includes('REDIS_HOST')) {
       logger.warn('  - Redis: Using in-memory cache (not recommended for production)');
     }
+    if (
+      notConfigured.includes('SMTP_HOST') ||
+      notConfigured.includes('SMTP_USER') ||
+      notConfigured.includes('SMTP_PASS')
+    ) {
+      logger.warn('  - Email: Login codes will fall back to console logging in development');
+    }
     logger.warn('');
   }
 
@@ -81,6 +95,7 @@ export function getEnvironmentInfo(): Record<string, any> {
       yookassa: !!(process.env.YOOKASSA_SHOP_ID && process.env.YOOKASSA_SECRET_KEY),
       firebase: !!process.env.FIREBASE_SERVICE_ACCOUNT,
       redis: !!process.env.REDIS_HOST,
+      email: !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
     },
   };
 }

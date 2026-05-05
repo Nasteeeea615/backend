@@ -16,31 +16,48 @@ let useMockCache = false;
  */
 export const initRedis = (): Redis | null => {
   // Проверяем, нужно ли использовать mock
-  if (process.env.USE_MOCK_CACHE === 'true' || !process.env.REDIS_HOST) {
+  const redisUrl = process.env.REDIS_URL;
+
+  if (process.env.USE_MOCK_CACHE === 'true' || (!process.env.REDIS_HOST && !redisUrl)) {
     logger.info('Using Mock Cache (in-memory) instead of Redis');
     useMockCache = true;
     return null;
   }
 
   try {
-    redis = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379'),
-      password: process.env.REDIS_PASSWORD,
-      db: parseInt(process.env.REDIS_DB || '0'),
-      retryStrategy: (times) => {
-        // После 3 попыток переключаемся на mock
-        if (times > 3) {
-          logger.warn('Redis connection failed, switching to Mock Cache');
-          useMockCache = true;
-          return null;
-        }
-        const delay = Math.min(times * 50, 2000);
-        return delay;
-      },
-      maxRetriesPerRequest: 3,
-      lazyConnect: true, // Не подключаемся сразу
-    });
+    redis = redisUrl
+      ? new Redis(redisUrl, {
+          db: parseInt(process.env.REDIS_DB || '0'),
+          retryStrategy: (times) => {
+            if (times > 3) {
+              logger.warn('Redis connection failed, switching to Mock Cache');
+              useMockCache = true;
+              return null;
+            }
+            const delay = Math.min(times * 50, 2000);
+            return delay;
+          },
+          maxRetriesPerRequest: 3,
+          lazyConnect: true,
+        })
+      : new Redis({
+          host: process.env.REDIS_HOST || 'localhost',
+          port: parseInt(process.env.REDIS_PORT || '6379'),
+          password: process.env.REDIS_PASSWORD,
+          db: parseInt(process.env.REDIS_DB || '0'),
+          retryStrategy: (times) => {
+            // После 3 попыток переключаемся на mock
+            if (times > 3) {
+              logger.warn('Redis connection failed, switching to Mock Cache');
+              useMockCache = true;
+              return null;
+            }
+            const delay = Math.min(times * 50, 2000);
+            return delay;
+          },
+          maxRetriesPerRequest: 3,
+          lazyConnect: true, // Не подключаемся сразу
+        });
 
     redis.on('connect', () => {
       logger.info('✅ Redis connected');

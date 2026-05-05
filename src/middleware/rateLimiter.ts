@@ -12,18 +12,30 @@ import rateLimit from 'express-rate-limit';
 import RedisStore from 'rate-limit-redis';
 import { Redis } from 'ioredis';
 
-// Redis client для rate limiting
-const redis = new Redis({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379'),
-    password: process.env.REDIS_PASSWORD,
-    enableOfflineQueue: false,
-});
+const shouldUseRedisStore =
+    process.env.RATE_LIMIT_STORE === 'redis' || process.env.NODE_ENV === 'production';
 
-// Обработка ошибок Redis
-redis.on('error', (err) => {
-    console.error('[Rate Limiter] Redis error:', err);
-});
+const redisUrl = process.env.REDIS_URL;
+
+let redis: Redis | null = null;
+
+if (shouldUseRedisStore) {
+    // Redis client для rate limiting
+    redis = redisUrl
+        ? new Redis(redisUrl)
+        : new Redis({
+            host: process.env.REDIS_HOST || 'localhost',
+            port: parseInt(process.env.REDIS_PORT || '6379'),
+            password: process.env.REDIS_PASSWORD,
+        });
+
+    // Обработка ошибок Redis
+    redis.on('error', (err) => {
+        console.error('[Rate Limiter] Redis error:', err);
+    });
+} else {
+    console.warn('[Rate Limiter] Using in-memory store (Redis disabled in this environment)');
+}
 
 // Базовая конфигурация
 const baseConfig = {
@@ -49,6 +61,18 @@ const baseConfig = {
     skipFailedRequests: false,
 };
 
+const createRedisStore = (prefix: string) => new RedisStore({
+    sendCommand: ((...args: string[]) => (redis as Redis).call(args[0], ...args.slice(1))) as any,
+    prefix,
+});
+
+const withStore = (prefix: string) => {
+    if (!redis) {
+        return {};
+    }
+    return { store: createRedisStore(prefix) };
+};
+
 // 1. Глобальный rate limiter (для всех запросов)
 export const globalLimiter = rateLimit({
     ...baseConfig,
@@ -57,10 +81,7 @@ export const globalLimiter = rateLimit({
     message: 'Слишком много запросов с вашего IP',
     
     // Использование Redis для распределенного rate limiting
-    store: new RedisStore({
-        client: redis,
-        prefix: 'rl:global:',
-    }),
+    ...withStore('rl:global:'),
 });
 
 // 2. API rate limiter (для /api/* endpoints)
@@ -70,10 +91,7 @@ export const apiLimiter = rateLimit({
     max: 60, // 60 запросов в минуту
     message: 'Слишком много API запросов',
     
-    store: new RedisStore({
-        client: redis,
-        prefix: 'rl:api:',
-    }),
+    ...withStore('rl:api:'),
 });
 
 // 3. Auth rate limiter (для /api/auth/* endpoints)
@@ -86,10 +104,7 @@ export const authLimiter = rateLimit({
     // Считать только неудачные попытки
     skipSuccessfulRequests: true,
     
-    store: new RedisStore({
-        client: redis,
-        prefix: 'rl:auth:',
-    }),
+    ...withStore('rl:auth:'),
 });
 
 // 4. Registration rate limiter
@@ -99,10 +114,7 @@ export const registrationLimiter = rateLimit({
     max: 3, // 3 регистрации в час с одного IP
     message: 'Слишком много попыток регистрации',
     
-    store: new RedisStore({
-        client: redis,
-        prefix: 'rl:register:',
-    }),
+    ...withStore('rl:register:'),
 });
 
 // 5. Password reset rate limiter
@@ -112,10 +124,7 @@ export const passwordResetLimiter = rateLimit({
     max: 3, // 3 запроса на сброс пароля
     message: 'Слишком много запросов на сброс пароля',
     
-    store: new RedisStore({
-        client: redis,
-        prefix: 'rl:password:',
-    }),
+    ...withStore('rl:password:'),
 });
 
 // 6. Order creation rate limiter
@@ -125,10 +134,7 @@ export const orderLimiter = rateLimit({
     max: 10, // 10 заказов за 5 минут
     message: 'Слишком много заказов. Подождите немного.',
     
-    store: new RedisStore({
-        client: redis,
-        prefix: 'rl:order:',
-    }),
+    ...withStore('rl:order:'),
 });
 
 // 7. File upload rate limiter
@@ -138,10 +144,7 @@ export const uploadLimiter = rateLimit({
     max: 20, // 20 загрузок файлов
     message: 'Слишком много загрузок файлов',
     
-    store: new RedisStore({
-        client: redis,
-        prefix: 'rl:upload:',
-    }),
+    ...withStore('rl:upload:'),
 });
 
 // 8. Webhook rate limiter (более мягкий)
@@ -151,10 +154,7 @@ export const webhookLimiter = rateLimit({
     max: 100, // 100 webhook запросов в минуту
     message: 'Слишком много webhook запросов',
     
-    store: new RedisStore({
-        client: redis,
-        prefix: 'rl:webhook:',
-    }),
+    ...withStore('rl:webhook:'),
 });
 
 // 9. Search rate limiter
@@ -164,10 +164,7 @@ export const searchLimiter = rateLimit({
     max: 30, // 30 поисковых запросов в минуту
     message: 'Слишком много поисковых запросов',
     
-    store: new RedisStore({
-        client: redis,
-        prefix: 'rl:search:',
-    }),
+    ...withStore('rl:search:'),
 });
 
 // 10. Admin rate limiter (более мягкий для админов)
@@ -177,10 +174,7 @@ export const adminLimiter = rateLimit({
     max: 120, // 120 запросов в минуту
     message: 'Слишком много запросов',
     
-    store: new RedisStore({
-        client: redis,
-        prefix: 'rl:admin:',
-    }),
+    ...withStore('rl:admin:'),
 });
 
 // Middleware для логирования rate limit events
