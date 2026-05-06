@@ -4,6 +4,11 @@ import logger from './logger';
  * Validate required environment variables
  */
 export function validateEnvironment(): void {
+  const redisConfigured = !!(process.env.REDIS_URL || process.env.REDIS_HOST);
+  const firebaseConfigured = !!process.env.FIREBASE_SERVICE_ACCOUNT;
+  const paymentConfigured = !!(process.env.YOOKASSA_SHOP_ID && process.env.YOOKASSA_SECRET_KEY);
+  const emailConfigured = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+
   const required = [
     'DB_HOST',
     'DB_PORT',
@@ -57,20 +62,16 @@ export function validateEnvironment(): void {
     logger.warn('⚠️  Optional services not configured:', notConfigured);
     logger.warn('Some features may not work:');
     
-    if (notConfigured.includes('YOOKASSA_SHOP_ID') || notConfigured.includes('YOOKASSA_SECRET_KEY')) {
+    if (!paymentConfigured) {
       logger.warn('  - YooKassa: Real payments will not work (using mock)');
     }
-    if (notConfigured.includes('FIREBASE_SERVICE_ACCOUNT')) {
+    if (!firebaseConfigured) {
       logger.warn('  - Firebase: Push notifications will not work');
     }
-    if (notConfigured.includes('REDIS_HOST')) {
+    if (!redisConfigured) {
       logger.warn('  - Redis: Using in-memory cache (not recommended for production)');
     }
-    if (
-      notConfigured.includes('SMTP_HOST') ||
-      notConfigured.includes('SMTP_USER') ||
-      notConfigured.includes('SMTP_PASS')
-    ) {
+    if (!emailConfigured) {
       logger.warn('  - Email: Login codes will fall back to console logging in development');
     }
     logger.warn('');
@@ -92,10 +93,10 @@ export function getEnvironmentInfo(): Record<string, any> {
       name: process.env.DB_NAME,
     },
     services: {
-      yookassa: !!(process.env.YOOKASSA_SHOP_ID && process.env.YOOKASSA_SECRET_KEY),
-      firebase: !!process.env.FIREBASE_SERVICE_ACCOUNT,
-      redis: !!process.env.REDIS_HOST,
-      email: !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
+      yookassa: paymentConfigured,
+      firebase: firebaseConfigured,
+      redis: redisConfigured,
+      email: emailConfigured,
     },
   };
 }
