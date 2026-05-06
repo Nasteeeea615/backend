@@ -185,6 +185,9 @@ const listenWithFallback = (startPort: number): Promise<number> => {
 // Test database connection and start server
 const startServer = async () => {
   try {
+    console.log('🔌 Attempting database connection...');
+    console.log(`DB Config: host=${process.env.DB_HOST}, port=${process.env.DB_PORT}, db=${process.env.DB_NAME}, user=${process.env.DB_USER}`);
+    
     // Test database connection
     await pool.query('SELECT NOW()');
     console.log('✅ Database connection successful');
@@ -196,8 +199,15 @@ const startServer = async () => {
     console.log(`🚀 Server is running on port ${activePort}`);
     console.log(`📡 WebSocket server is ready`);
     console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  } catch (error) {
+  } catch (error: any) {
     console.error('❌ Failed to start server:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      syscall: error.syscall,
+      hostname: error.hostname,
+      port: error.port,
+    });
     process.exit(1);
   }
 };
