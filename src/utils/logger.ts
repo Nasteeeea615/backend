@@ -1,8 +1,8 @@
 import winston from 'winston';
-import path from 'path';
 
 /**
  * Конфигурация логгера с Winston
+ * На Render используем только console, файловые логи отключены
  */
 
 // Определяем уровни логирования
@@ -43,36 +43,12 @@ const consoleFormat = winston.format.combine(
 );
 
 // Определяем транспорты (куда писать логи)
+// На Render и в production используем ТОЛЬКО console логи (нет доступа к файловой системе)
 const transports: winston.transport[] = [
-  // Консоль
   new winston.transports.Console({
     format: consoleFormat,
   }),
 ];
-
-// Файловые логи только в development, не на production/Render
-if (process.env.NODE_ENV === 'development' && process.env.LOG_TO_FILE !== 'false') {
-  // Все логи
-  transports.push(
-    new winston.transports.File({
-      filename: path.join('logs', 'combined.log'),
-      format,
-      maxsize: 5242880, // 5MB
-      maxFiles: 5,
-    })
-  );
-
-  // Только ошибки
-  transports.push(
-    new winston.transports.File({
-      filename: path.join('logs', 'error.log'),
-      level: 'error',
-      format,
-      maxsize: 5242880, // 5MB
-      maxFiles: 5,
-    })
-  );
-}
 
 // Создаем logger
 const logger = winston.createLogger({
