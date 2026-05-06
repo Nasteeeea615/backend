@@ -28,12 +28,28 @@ npm install
 
 ## Настройка
 
-1. Скопируйте `.env.example` в `.env`:
-```bash
-cp .env.example .env
-```
+1. Создайте файл `.env` и заполните переменные окружения
 
 2. Настройте переменные окружения в `.env`
+
+### Минимальный набор для email-кода входа
+
+```env
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=septik_service
+DB_USER=postgres
+DB_PASSWORD=postgres
+JWT_SECRET=change_me_to_a_long_random_secret
+JWT_EXPIRES_IN=15m
+JWT_REFRESH_EXPIRES_IN=7d
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=your_smtp_user
+SMTP_PASS=your_smtp_password
+SMTP_FROM_EMAIL=no-reply@example.com
+LOGIN_CODE_TTL_MINUTES=10
+```
 
 3. Создайте базу данных PostgreSQL:
 ```sql
@@ -69,11 +85,14 @@ npm start
 - `GET /health` - проверка работоспособности сервера
 
 ### Authentication
-- `POST /api/auth/send-sms` - отправка SMS-кода
-- `POST /api/auth/verify-sms` - проверка SMS-кода
+- `POST /api/auth/request-code` - отправка email-кода для входа
+- `POST /api/auth/verify-code` - проверка email-кода и создание сессии
+- `GET /api/auth/me` - текущий пользователь
 - `POST /api/auth/register-client` - регистрация клиента
 - `POST /api/auth/register-executor` - регистрация исполнителя
 - `POST /api/auth/logout` - выход
+
+Совместимость сохранена: `POST /api/auth/send-sms` и `POST /api/auth/verify-sms` по-прежнему работают как алиасы для email-кода.
 
 ### Orders (Client)
 - `POST /api/orders` - создание заказа
@@ -105,8 +124,6 @@ npm start
 - `POST /api/notifications/register-token` - зарегистрировать FCM токен
 
 ### Admin
-Полная документация: [ADMIN_API.md](./ADMIN_API.md)
-
 - `GET /api/admin/orders` - все заказы
 - `PUT /api/admin/orders/:id` - обновить заказ
 - `POST /api/admin/orders/:id/assign` - назначить исполнителя

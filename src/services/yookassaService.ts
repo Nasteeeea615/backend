@@ -276,12 +276,46 @@ class YooKassaService {
     // If signature header provided, verify HMAC SHA256
     if (signature) {
       try {
-        const expected = crypto.createHmac('sha256', this.config.secretKey).update(payload).digest('hex');
-        // Use timing-safe comparison
-        const sigBuf = Buffer.from(signature);
-        const expBuf = Buffer.from(expected);
-        if (sigBuf.length !== expBuf.length) return false;
-        return crypto.timingSafeEqual(sigBuf, expBuf);
+        const normalizedSignature = signature
+          .trim()
+          .replace(/^sha256=/i, '')
+          .replace(/^"|"$/g, '')
+          .toLowerCase();
+
+        const payloadCandidates: string[] = [payload];
+        try {
+          payloadCandidates.push(JSON.stringify(JSON.parse(payload)));
+        } catch {
+          // Keep raw payload only if it is not valid JSON.
+        }
+
+        for (const candidate of payloadCandidates) {
+          const expected = crypto
+            .createHmac('sha256', this.config.secretKey)
+            .update(candidate)
+            .digest('hex')
+            .toLowerCase();
+
+          const isHex = /^[a-f0-9]+$/i.test(normalizedSignature) && normalizedSignature.length % 2 === 0;
+
+          if (isHex) {
+            const sigBuf = Buffer.from(normalizedSignature, 'hex');
+            const expBuf = Buffer.from(expected, 'hex');
+            if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
+              return true;
+            }
+            continue;
+          }
+
+          // Fallback for non-hex signatures.
+          const sigBuf = Buffer.from(normalizedSignature);
+          const expBuf = Buffer.from(expected);
+          if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
+            return true;
+          }
+        }
+
+        return false;
       } catch (e) {
         logger.error('Error verifying webhook signature', { error: (e as Error).message });
         return false;

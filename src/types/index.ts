@@ -4,6 +4,7 @@ import { Request } from 'express';
 export interface User {
   id: string;
   phone_number: string;
+  email?: string | null;
   name: string;
   role: 'client' | 'executor' | 'admin';
   is_blocked: boolean;
@@ -42,8 +43,11 @@ export interface Order {
   scheduled_date: Date;
   scheduled_time: string;
   comment?: string;
-  is_urgent: boolean;
   price: number;
+  payment_type: 'cash' | 'sbp';
+  payment_status?: 'pending' | 'paid' | 'failed' | 'refunded' | 'cash_collected' | 'cancelled';
+  commission?: number;
+  net_amount?: number;
   created_at: Date;
   accepted_at?: Date;
   completed_at?: Date;
@@ -55,7 +59,7 @@ export interface Payment {
   order_id: string;
   client_id: string;
   amount: number;
-  status: 'pending' | 'completed' | 'failed' | 'refunded';
+  status: 'pending' | 'pending_cash' | 'completed' | 'failed' | 'refunded';
   payment_method: PaymentMethod;
   transaction_id?: string;
   created_at: Date;
@@ -63,7 +67,7 @@ export interface Payment {
 }
 
 export interface PaymentMethod {
-  type: 'card' | 'saved_card';
+  type: 'card' | 'saved_card' | 'sbp' | 'cash';
   card_last4?: string;
   card_token?: string;
 }
@@ -135,7 +139,7 @@ export interface CreateOrderDTO {
   scheduled_date: Date;
   scheduled_time: string;
   comment?: string;
-  is_urgent: boolean;
+  payment_type: 'cash' | 'sbp';
 }
 
 export interface RegisterClientDTO {
@@ -153,4 +157,15 @@ export interface RegisterExecutorDTO {
   vehicle_number: string;
   vehicle_capacity: 3 | 5 | 10;
   agreed_to_terms: boolean;
+}
+
+export interface RequestLoginCodeDTO {
+  email: string;
+  role?: 'client' | 'executor' | 'admin';
+}
+
+export interface VerifyLoginCodeDTO {
+  email: string;
+  code: string;
+  role?: 'client' | 'executor' | 'admin';
 }

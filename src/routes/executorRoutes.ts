@@ -29,4 +29,13 @@ router.post('/orders/:id/accept', executorController.acceptOrder);
 // POST /api/executor/orders/:id/complete - Complete order
 router.post('/orders/:id/complete', executorController.completeOrder);
 
+// GET /api/executor/balance - Get executor balance and recent transactions
+router.get('/balance', executorController.getBalance);
+
+// POST /api/executor/deposit - Create balance top-up payment via YooKassa
+router.post('/deposit', executorController.createDepositPayment);
+
+// POST /api/executor/withdraw - Request withdrawal
+router.post('/withdraw', executorController.requestWithdrawal);
+
 export default router;

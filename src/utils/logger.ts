@@ -50,8 +50,10 @@ const transports: winston.transport[] = [
   }),
 ];
 
-// В production добавляем файловые транспорты
-if (process.env.NODE_ENV === 'production') {
+// Файловые логи включаем только явно, чтобы не падать в средах с read-only FS
+const enableFileLogging = process.env.LOG_TO_FILE === 'true' || process.env.NODE_ENV === 'development';
+
+if (enableFileLogging) {
   // Все логи
   transports.push(
     new winston.transports.File({

@@ -50,7 +50,7 @@ initializeFirebase();
 
 export interface NotificationPayload {
   userId: string;
-  type: 'order_accepted' | 'order_completed' | 'payment_success' | 'new_order' | 'ticket_reply' | 'urgent_order_assigned';
+  type: 'order_accepted' | 'order_completed' | 'payment_success' | 'new_order' | 'ticket_reply';
   title: string;
   body: string;
   data?: Record<string, string>;
@@ -295,22 +295,6 @@ class NotificationService {
       type: 'new_order',
       title: 'Новый заказ',
       body: `Доступен новый заказ: ${address}, ${capacity}м³`,
-      data: {
-        orderId,
-        screen: 'ExecutorHome',
-      },
-    });
-  }
-
-  /**
-   * Send notification to executor about urgent order assignment
-   */
-  async notifyUrgentOrderAssigned(executorId: string, orderId: string, address: string): Promise<void> {
-    await this.sendPushNotification({
-      userId: executorId,
-      type: 'urgent_order_assigned',
-      title: 'Срочный заказ назначен',
-      body: `Вам назначен срочный заказ: ${address}`,
       data: {
         orderId,
         screen: 'ExecutorHome',

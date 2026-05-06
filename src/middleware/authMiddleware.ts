@@ -13,13 +13,16 @@ export const authenticate = async (
   next: NextFunction
 ) => {
   try {
-    // Get token from header
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const bearerToken = authHeader && authHeader.startsWith('Bearer ')
+      ? authHeader.substring(7)
+      : null;
+    const cookieToken = parseAccessTokenFromCookies(req.headers.cookie);
+    const token = bearerToken || cookieToken;
+
+    if (!token) {
       throw new AppError('UNAUTHORIZED', 'No token provided', 401);
     }
-
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
     // Verify token
     const payload = jwtService.verifyToken(token);
@@ -65,3 +68,18 @@ export const authorize = (...roles: string[]) => {
     next();
   };
 };
+
+function parseAccessTokenFromCookies(cookieHeader?: string): string | null {
+  if (!cookieHeader) {
+    return null;
+  }
+
+  const cookies = cookieHeader.split(';').map(part => part.trim());
+  const accessToken = cookies.find(cookie => cookie.startsWith('access_token='));
+
+  if (!accessToken) {
+    return null;
+  }
+
+  return decodeURIComponent(accessToken.substring('access_token='.length));
+}

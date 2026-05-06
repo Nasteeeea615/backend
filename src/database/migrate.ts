@@ -9,11 +9,7 @@ async function runMigrations() {
   console.log('🔄 Running database migrations...\n');
 
   const migrations = [
-    '001_create_users_tables.sql',
-    '002_create_orders_payments_tables.sql',
-    '003_add_yookassa_fields.sql',
-    '003_create_support_notifications_tables.sql',
-    '004_create_fcm_tokens_table.sql',
+    '001_full_schema.sql',
   ];
 
   try {

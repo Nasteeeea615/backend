@@ -1,6 +1,5 @@
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import mongoSanitize from 'express-mongo-sanitize';
 import hpp from 'hpp';
 import { Request, Response, NextFunction } from 'express';
 
@@ -105,13 +104,39 @@ export const apiLimiter = rateLimit({
  * Sanitization middleware для защиты от NoSQL injection и XSS
  */
 
-// Защита от NoSQL injection
-export const sanitizeData = mongoSanitize({
-  replaceWith: '_', // Заменять запрещенные символы на _
-  onSanitize: ({ req, key }) => {
-    console.warn(`Sanitized request data: ${key} in ${req.path}`);
-  },
-});
+// Защита от NoSQL injection (Express 5-compatible, in-place)
+export const sanitizeData = (req: Request, _res: Response, next: NextFunction) => {
+  const sanitizeNoSql = (value: any): any => {
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i += 1) {
+        value[i] = sanitizeNoSql(value[i]);
+      }
+      return value;
+    }
+
+    if (value !== null && typeof value === 'object') {
+      for (const rawKey of Object.keys(value)) {
+        const safeKey = rawKey.replace(/\$|\./g, '_');
+        const sanitizedValue = sanitizeNoSql(value[rawKey]);
+
+        if (safeKey !== rawKey) {
+          delete value[rawKey];
+          value[safeKey] = sanitizedValue;
+          console.warn(`Sanitized request data: ${rawKey} -> ${safeKey} in ${req.path}`);
+        } else {
+          value[rawKey] = sanitizedValue;
+        }
+      }
+    }
+
+    return value;
+  };
+
+  sanitizeNoSql(req.body);
+  sanitizeNoSql(req.query as any);
+  sanitizeNoSql(req.params);
+  next();
+};
 
 // Защита от HTTP Parameter Pollution
 export const preventParameterPollution = hpp({
@@ -128,35 +153,31 @@ export const preventParameterPollution = hpp({
  * Очищает входные данные от потенциально опасного контента
  */
 export const sanitizeInput = (req: Request, _res: Response, next: NextFunction) => {
-  // Рекурсивная функция для очистки объектов
+  // Рекурсивная функция для очистки объектов in-place
   const sanitize = (obj: any): any => {
     if (typeof obj === 'string') {
       // Удаляем HTML теги
       return obj.replace(/<[^>]*>/g, '');
     }
     if (Array.isArray(obj)) {
-      return obj.map(sanitize);
+      for (let i = 0; i < obj.length; i += 1) {
+        obj[i] = sanitize(obj[i]);
+      }
+      return obj;
     }
     if (obj !== null && typeof obj === 'object') {
-      const sanitized: any = {};
-      for (const key in obj) {
-        sanitized[key] = sanitize(obj[key]);
+      for (const key of Object.keys(obj)) {
+        obj[key] = sanitize(obj[key]);
       }
-      return sanitized;
+      return obj;
     }
     return obj;
   };
 
   // Очищаем body, query и params
-  if (req.body) {
-    req.body = sanitize(req.body);
-  }
-  if (req.query) {
-    req.query = sanitize(req.query);
-  }
-  if (req.params) {
-    req.params = sanitize(req.params);
-  }
+  sanitize(req.body);
+  sanitize(req.query as any);
+  sanitize(req.params);
 
   next();
 };

@@ -20,6 +20,22 @@ class UserService {
   }
 
   /**
+   * Find user by email
+   */
+  async findByEmail(email: string): Promise<User | null> {
+    const result = await pool.query(
+      'SELECT * FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return result.rows[0];
+  }
+
+  /**
    * Find user by ID
    */
   async findById(userId: string): Promise<User | null> {

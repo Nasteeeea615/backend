@@ -30,10 +30,7 @@ GRANT ALL PRIVILEGES ON DATABASE septik_service TO septik_user;
 
 ## Шаг 3: Настройка Environment Variables
 
-1. Скопируйте `.env.example` в `.env`:
-```bash
-cp .env.example .env
-```
+1. Создайте `.env` в папке backend
 
 2. Заполните обязательные переменные:
 
@@ -53,7 +50,7 @@ JWT_REFRESH_EXPIRES_IN=7d
 
 3. Настройте YooKassa (см. [YooKassa Setup](#yookassa-setup))
 
-4. Настройте Firebase (см. [Firebase Setup](./FIREBASE_SETUP.md))
+4. Настройте Firebase credentials в переменной `FIREBASE_SERVICE_ACCOUNT`
 
 ## Шаг 4: Запуск миграций
 
@@ -148,8 +145,6 @@ YOOKASSA_RETURN_URL=septikservice://payment/return
 - **3DS:** 5555 5555 5555 4444
 
 ## Firebase Setup
-
-См. подробную инструкцию в [FIREBASE_SETUP.md](./FIREBASE_SETUP.md)
 
 Краткая версия:
 1. Создайте проект в [Firebase Console](https://console.firebase.google.com/)

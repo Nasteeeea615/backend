@@ -23,7 +23,8 @@ class OrderController {
       !data.street ||
       !data.house_number ||
       !data.scheduled_date ||
-      !data.scheduled_time
+      !data.scheduled_time ||
+      !data.payment_type
     ) {
       throw new AppError('MISSING_REQUIRED_FIELD', 'All fields are required', 400);
     }
@@ -31,6 +32,11 @@ class OrderController {
     // Validate vehicle capacity
     if (![3, 5, 10].includes(data.vehicle_capacity)) {
       throw new AppError('INVALID_VEHICLE_CAPACITY', 'Vehicle capacity must be 3, 5, or 10', 400);
+    }
+
+    // Validate payment type
+    if (!['cash', 'sbp'].includes(data.payment_type)) {
+      throw new AppError('INVALID_PAYMENT_METHOD', 'Payment type must be cash or sbp', 400);
     }
 
     // Create order
@@ -100,22 +106,13 @@ class OrderController {
     }
 
     const id = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id || '');
-    const { paymentMethod, saveCard } = req.body;
+    const { paymentMethod } = req.body;
 
     if (!paymentMethod) {
       throw new AppError('MISSING_REQUIRED_FIELD', 'Payment method is required', 400);
     }
 
-    const payment = await paymentService.createPayment(req.user.id, id, paymentMethod);
-
-    // Save card if requested
-    if (saveCard && paymentMethod.type === 'card') {
-      await paymentService.savePaymentMethod(req.user.id, {
-        type: 'saved_card',
-        cardLast4: paymentMethod.cardLast4,
-        cardToken: paymentMethod.cardToken,
-      });
-    }
+    const payment = await paymentService.createPayment(id, req.user.id, paymentMethod);
 
     const response: APIResponse = {
       success: true,

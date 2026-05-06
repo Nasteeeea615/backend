@@ -104,7 +104,6 @@ export const createOrderSchema = Joi.object({
   comment: Joi.string().max(500).allow('').messages({
     'string.max': 'Комментарий не должен превышать 500 символов',
   }),
-  isUrgent: Joi.boolean().default(false),
 });
 
 export const updateOrderStatusSchema = Joi.object({

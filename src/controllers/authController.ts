@@ -2,9 +2,129 @@ import { Request, Response } from 'express';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import jwtService from '../services/jwtService';
 import userService from '../services/userService';
-import { RegisterClientDTO, RegisterExecutorDTO, APIResponse } from '../types';
+import emailService from '../services/emailService';
+import loginCodeService from '../services/loginCodeService';
+import {
+  RegisterClientDTO,
+  RegisterExecutorDTO,
+  RequestLoginCodeDTO,
+  VerifyLoginCodeDTO,
+  APIResponse,
+} from '../types';
 
 class AuthController {
+
+  /**
+   * POST /api/auth/request-code
+   * Send email confirmation code for login
+   */
+  requestCode = asyncHandler(async (req: Request, res: Response) => {
+    const data: RequestLoginCodeDTO = req.body;
+
+    if (!data.email) {
+      throw new AppError('MISSING_REQUIRED_FIELD', 'Email is required', 400);
+    }
+
+    const email = data.email.trim().toLowerCase();
+    const user = await userService.findByEmail(email);
+
+    if (!user) {
+      throw new AppError('USER_NOT_FOUND', 'User with this email was not found', 404);
+    }
+
+    if (data.role && user.role !== data.role) {
+      throw new AppError('FORBIDDEN', 'This account does not have the required role', 403);
+    }
+
+    const code = loginCodeService.generateCode();
+    await loginCodeService.storeCode(email, code, data.role || user.role);
+    const delivery = await emailService.sendLoginCode(email, code, data.role || user.role);
+
+    const response: APIResponse = {
+      success: true,
+      data: {
+        message: 'Verification code sent',
+        email,
+        expiresInMinutes: parseInt(process.env.LOGIN_CODE_TTL_MINUTES || '10', 10),
+        ...(delivery.debugCode && process.env.NODE_ENV !== 'production'
+          ? { debugCode: delivery.debugCode }
+          : {}),
+      },
+    };
+
+    res.json(response);
+  });
+
+  /**
+   * POST /api/auth/verify-code
+   * Verify email confirmation code and create access cookie
+   */
+  verifyCode = asyncHandler(async (req: Request, res: Response) => {
+    const data: VerifyLoginCodeDTO = req.body;
+
+    if (!data.email || !data.code) {
+      throw new AppError('MISSING_REQUIRED_FIELD', 'Email and code are required', 400);
+    }
+
+    const email = data.email.trim().toLowerCase();
+    const user = await userService.findByEmail(email);
+
+    if (!user) {
+      throw new AppError('USER_NOT_FOUND', 'User with this email was not found', 404);
+    }
+
+    if (data.role && user.role !== data.role) {
+      throw new AppError('FORBIDDEN', 'This account does not have the required role', 403);
+    }
+
+    const verified = await loginCodeService.verifyCode(email, data.code.trim(), data.role || user.role);
+    if (!verified) {
+      throw new AppError('INVALID_TOKEN', 'Invalid or expired verification code', 401);
+    }
+
+    const token = jwtService.generateToken({ userId: user.id, role: user.role });
+    res.cookie('access_token', token, buildCookieOptions());
+
+    const response: APIResponse = {
+      success: true,
+      data: {
+        token,
+        user: await userService.getUserWithProfile(user.id),
+      },
+    };
+
+    res.json(response);
+  });
+
+  /**
+   * GET /api/auth/me
+   * Return current authenticated user
+   */
+  me = asyncHandler(async (req: Request, res: Response) => {
+    const authHeader = req.headers.authorization;
+    const cookieToken = parseAccessTokenFromCookies(req.headers.cookie);
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.substring(7)
+      : cookieToken;
+
+    if (!token) {
+      throw new AppError('UNAUTHORIZED', 'No token provided', 401);
+    }
+
+    const payload = jwtService.verifyToken(token);
+    if (!payload) {
+      throw new AppError('UNAUTHORIZED', 'Invalid or expired token', 401);
+    }
+
+    const user = await userService.getUserWithProfile(payload.userId);
+
+    const response: APIResponse = {
+      success: true,
+      data: { user },
+    };
+
+    res.json(response);
+  });
 
   /**
    * POST /api/auth/register-client
@@ -35,16 +155,7 @@ class AuthController {
     const token = jwtService.generateToken({ userId: user.id, role: user.role });
 
     // Cookie options
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict' as const,
-      path: '/',
-      // Set maxAge based on JWT_EXPIRES_IN (approximate)
-      maxAge: parseDurationToMs(process.env.JWT_EXPIRES_IN || '15m'),
-    };
-
-    res.cookie('access_token', token, cookieOptions);
+    res.cookie('access_token', token, buildCookieOptions());
 
     const response: APIResponse = {
       success: true,
@@ -89,15 +200,7 @@ class AuthController {
     // Generate access token and set as HttpOnly cookie
     const token = jwtService.generateToken({ userId: user.id, role: user.role });
 
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict' as const,
-      path: '/',
-      maxAge: parseDurationToMs(process.env.JWT_EXPIRES_IN || '15m'),
-    };
-
-    res.cookie('access_token', token, cookieOptions);
+    res.cookie('access_token', token, buildCookieOptions());
 
     const response: APIResponse = {
       success: true,
@@ -154,4 +257,29 @@ function parseDurationToMs(value: string): number {
     default:
       return n;
   }
+}
+
+function buildCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax' as const,
+    path: '/',
+    maxAge: parseDurationToMs(process.env.JWT_EXPIRES_IN || '15m'),
+  };
+}
+
+function parseAccessTokenFromCookies(cookieHeader?: string): string | null {
+  if (!cookieHeader) {
+    return null;
+  }
+
+  const cookies = cookieHeader.split(';').map(part => part.trim());
+  const accessToken = cookies.find(cookie => cookie.startsWith('access_token='));
+
+  if (!accessToken) {
+    return null;
+  }
+
+  return decodeURIComponent(accessToken.substring('access_token='.length));
 }

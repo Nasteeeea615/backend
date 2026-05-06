@@ -4,9 +4,81 @@ import { AppError } from '../middleware/errorHandler';
 import { io } from '../index';
 import notificationService from './notificationService';
 import yookassaService from './yookassaService';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
+import balanceService from './balanceService';
+import logger from '../utils/logger';
 
 class PaymentService {
+  private timeoutJobStarted = false;
+  private readonly sbpTimeoutMinutes = Number(process.env.SBP_PAYMENT_TIMEOUT_MINUTES || 15);
+
+  /**
+   * Start background job that expires stale SBP payments.
+   */
+  startSbpTimeoutScheduler(): void {
+    if (this.timeoutJobStarted) {
+      return;
+    }
+
+    this.timeoutJobStarted = true;
+
+    // Run once at startup to clean stale pending payments.
+    this.expireTimedOutSbpPayments().catch((error: any) => {
+      logger.error('Initial SBP timeout sweep failed', {
+        error: error?.message,
+      });
+    });
+
+    // Sweep every minute.
+    setInterval(() => {
+      this.expireTimedOutSbpPayments().catch((error: any) => {
+        logger.error('SBP timeout sweep failed', {
+          error: error?.message,
+        });
+      });
+    }, 60 * 1000);
+
+    logger.info('SBP timeout scheduler started', {
+      timeoutMinutes: this.sbpTimeoutMinutes,
+      intervalSeconds: 60,
+    });
+  }
+
+  /**
+   * Mark pending SBP payments older than timeout as failed.
+   */
+  async expireTimedOutSbpPayments(): Promise<number> {
+    const result = await pool.query(
+      `WITH expired AS (
+         UPDATE payments p
+         SET status = 'failed',
+             yookassa_status = COALESCE(p.yookassa_status, 'canceled'),
+             error_message = $1
+         FROM orders o
+         WHERE p.order_id = o.id
+           AND p.status = 'pending'
+           AND o.payment_type = 'sbp'
+           AND p.created_at <= NOW() - ($2::text || ' minutes')::interval
+         RETURNING p.order_id, p.id
+       )
+       UPDATE orders o
+       SET payment_status = 'cancelled'
+       FROM expired e
+       WHERE o.id = e.order_id
+       RETURNING e.id`,
+      [`Истекло время оплаты (${this.sbpTimeoutMinutes} минут)`, String(this.sbpTimeoutMinutes)]
+    );
+
+    if (result.rowCount && result.rowCount > 0) {
+      logger.info('Expired stale SBP payments', {
+        count: result.rowCount,
+        timeoutMinutes: this.sbpTimeoutMinutes,
+      });
+    }
+
+    return result.rowCount || 0;
+  }
+
   /**
    * Create payment for order
    */
@@ -32,8 +104,8 @@ class PaymentService {
 
     // Check if payment already exists
     const existingPayment = await pool.query(
-      'SELECT * FROM payments WHERE order_id = $1 AND status IN ($2, $3)',
-      [orderId, 'completed', 'pending']
+      'SELECT * FROM payments WHERE order_id = $1 AND status IN ($2, $3, $4)',
+      [orderId, 'completed', 'pending', 'pending_cash']
     );
 
     if (existingPayment.rows.length > 0) {
@@ -48,7 +120,41 @@ class PaymentService {
       };
     }
 
-    const idempotencyKey = uuidv4();
+    const idempotencyKey = randomUUID();
+
+    // Cash payments are confirmed in-app without YooKassa redirect
+    if (paymentMethod?.type === 'cash' || order.payment_type === 'cash') {
+      const cashResult = await pool.query(
+        `INSERT INTO payments (
+          order_id, client_id, amount, status, payment_method,
+          idempotency_key, yookassa_payment_id, yookassa_status
+        )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING *`,
+        [
+          orderId,
+          clientId,
+          order.price,
+          'pending_cash',
+          JSON.stringify({ type: 'cash' }),
+          idempotencyKey,
+          null,
+          null,
+        ]
+      );
+
+      const cashPayment = cashResult.rows[0];
+      await this.processPayment(cashPayment.id);
+
+      const completedCashPayment = await pool.query('SELECT * FROM payments WHERE id = $1', [
+        cashPayment.id,
+      ]);
+
+      return {
+        payment: completedCashPayment.rows[0],
+        confirmation_url: null,
+      };
+    }
 
     // Create payment record in database first
     const result = await pool.query(
@@ -83,6 +189,13 @@ class PaymentService {
              confirmation_url = $3
          WHERE id = $4`,
         [yookassaPayment.id, yookassaPayment.status, yookassaPayment.confirmation.confirmation_url, payment.id]
+      );
+
+      await pool.query(
+        `UPDATE orders
+         SET payment_status = 'pending'
+         WHERE id = $1`,
+        [orderId]
       );
 
       return {
@@ -129,6 +242,13 @@ class PaymentService {
     );
 
     const payment = result.rows[0];
+
+    await pool.query(
+      `UPDATE orders
+       SET payment_status = 'paid'
+       WHERE id = $1`,
+      [payment.order_id]
+    );
 
     // Send push notifications
     await notificationService.notifyPaymentSuccess(payment.client_id, payment.order_id, payment.amount);
@@ -181,6 +301,30 @@ class PaymentService {
     );
 
     if (result.rows.length === 0) {
+      // Handle executor balance top-up payments that are not tied to orders.
+      const metadata = paymentData?.metadata || {};
+      if (metadata.kind === 'executor_deposit' && metadata.executor_id) {
+        const existingTopup = await pool.query(
+          `SELECT id
+           FROM balance_transactions
+           WHERE executor_id = $1
+             AND type = 'deposit'
+             AND description = $2
+           LIMIT 1`,
+          [metadata.executor_id, `Пополнение через YooKassa ${yookassaPaymentId}`]
+        );
+
+        if (existingTopup.rows.length === 0) {
+          await balanceService.recordDeposit(
+            metadata.executor_id,
+            Number(paymentData?.amount?.value || metadata.amount || 0),
+            `Пополнение через YooKassa ${yookassaPaymentId}`
+          );
+        }
+
+        return;
+      }
+
       throw new AppError('PAYMENT_NOT_FOUND', 'Payment not found', 404);
     }
 
@@ -195,6 +339,13 @@ class PaymentService {
            completed_at = NOW()
        WHERE id = $3`,
       [paymentData.status, yookassaPaymentId, payment.id]
+    );
+
+    await pool.query(
+      `UPDATE orders
+       SET payment_status = 'paid'
+       WHERE id = $1`,
+      [payment.order_id]
     );
 
     // Get order details
@@ -244,6 +395,7 @@ class PaymentService {
    */
   private async handlePaymentFailed(paymentData: any): Promise<void> {
     const yookassaPaymentId = paymentData.id;
+    const cancellationReason = paymentData.cancellation_details?.reason || 'Payment canceled';
 
     await pool.query(
       `UPDATE payments 
@@ -251,7 +403,18 @@ class PaymentService {
            yookassa_status = $1,
            error_message = $2
        WHERE yookassa_payment_id = $3`,
-      [paymentData.status, paymentData.cancellation_details?.reason || 'Payment canceled', yookassaPaymentId]
+      [paymentData.status, cancellationReason, yookassaPaymentId]
+    );
+
+    await pool.query(
+      `UPDATE orders
+       SET payment_status = 'cancelled'
+       WHERE id IN (
+         SELECT order_id
+         FROM payments
+         WHERE yookassa_payment_id = $1
+       )`,
+      [yookassaPaymentId]
     );
   }
 
@@ -267,6 +430,17 @@ class PaymentService {
        WHERE yookassa_payment_id = $1`,
       [yookassaPaymentId]
     );
+
+    await pool.query(
+      `UPDATE orders
+       SET payment_status = 'refunded'
+       WHERE id IN (
+         SELECT order_id
+         FROM payments
+         WHERE yookassa_payment_id = $1
+       )`,
+      [yookassaPaymentId]
+    );
   }
 
   /**
@@ -277,35 +451,6 @@ class PaymentService {
 
     return result.rows.length > 0 ? result.rows[0] : null;
   }
-
-  /**
-   * Save payment method for future use
-   */
-  async savePaymentMethod(clientId: string, paymentMethod: any): Promise<void> {
-    await pool.query(
-      `UPDATE client_profiles 
-       SET saved_payment_methods = saved_payment_methods || $1::jsonb
-       WHERE user_id = $2`,
-      [JSON.stringify([paymentMethod]), clientId]
-    );
-  }
-
-  /**
-   * Get saved payment methods
-   */
-  async getSavedPaymentMethods(clientId: string): Promise<any[]> {
-    const result = await pool.query(
-      'SELECT saved_payment_methods FROM client_profiles WHERE user_id = $1',
-      [clientId]
-    );
-
-    if (result.rows.length === 0) {
-      return [];
-    }
-
-    return result.rows[0].saved_payment_methods || [];
-  }
-
   /**
    * Process refund
    */

@@ -3,6 +3,7 @@ import { Order } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { io } from '../index';
 import notificationService from './notificationService';
+import balanceService from './balanceService';
 
 class ExecutorService {
   /**
@@ -51,14 +52,13 @@ class ExecutorService {
         o.city,
         o.scheduled_date,
         o.scheduled_time,
-        o.is_urgent,
         o.price,
         o.created_at,
         o.status
        FROM orders o
        WHERE o.status = 'pending'
          AND o.vehicle_capacity = $1
-       ORDER BY o.is_urgent DESC, o.created_at ASC`,
+       ORDER BY o.created_at ASC`,
       [vehicleCapacity]
     );
 
@@ -72,6 +72,25 @@ class ExecutorService {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
+      // Block order acceptance when executor balance is non-positive.
+      const balanceCheck = await client.query(
+        'SELECT balance FROM executor_profiles WHERE user_id = $1 FOR UPDATE',
+        [executorId]
+      );
+
+      if (balanceCheck.rows.length === 0) {
+        throw new AppError('EXECUTOR_NOT_FOUND', 'Executor profile not found', 404);
+      }
+
+      const currentBalance = Number(balanceCheck.rows[0].balance || 0);
+      if (currentBalance <= 0) {
+        throw new AppError(
+          'INSUFFICIENT_BALANCE',
+          'Невозможно принять заказ. Баланс равен 0',
+          403
+        );
+      }
 
       // Check if order is still available
       const orderCheck = await client.query(
@@ -140,13 +159,50 @@ class ExecutorService {
         throw new AppError('ORDER_NOT_FOUND', 'Order not found or not assigned to you', 404);
       }
 
+      const currentOrder = orderCheck.rows[0];
+      const price = Number(currentOrder.price);
+      const commission = Math.round(price * 0.2 * 100) / 100;
+      const netAmount = Math.round((price - commission) * 100) / 100;
+
+      let settlementPaymentId: string | undefined;
+      let orderPaymentStatus = currentOrder.payment_status || 'pending';
+
+      if (currentOrder.payment_type === 'sbp') {
+        const paymentResult = await client.query(
+          `SELECT id, status
+           FROM payments
+           WHERE order_id = $1
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [orderId]
+        );
+
+        if (paymentResult.rows.length === 0 || paymentResult.rows[0].status !== 'completed') {
+          throw new AppError(
+            'PAYMENT_REQUIRED',
+            'Заказ СБП должен быть оплачен перед завершением',
+            400
+          );
+        }
+
+        settlementPaymentId = paymentResult.rows[0].id;
+        orderPaymentStatus = 'paid';
+      } else {
+        // For cash orders, we only settle the platform commission at completion.
+        orderPaymentStatus = 'cash_collected';
+      }
+
       // Update order status
       const result = await client.query(
         `UPDATE orders 
-         SET status = 'completed', completed_at = NOW()
+         SET status = 'completed',
+             completed_at = NOW(),
+             commission = $2,
+             net_amount = $3,
+             payment_status = $4
          WHERE id = $1
          RETURNING *`,
-        [orderId]
+        [orderId, commission, netAmount, orderPaymentStatus]
       );
 
       // Update executor stats
@@ -160,6 +216,22 @@ class ExecutorService {
       await client.query('COMMIT');
 
       const order = result.rows[0];
+
+      // Settlement happens only after order completion (Yandex Taxi style offset model).
+      try {
+        if (order.payment_type === 'sbp') {
+          await balanceService.creditEarnings(
+            executorId,
+            orderId,
+            settlementPaymentId || `sbp_settlement_${orderId}`,
+            price
+          );
+        } else {
+          await balanceService.deductCommission(executorId, orderId, price);
+        }
+      } catch (err) {
+        console.error('Error applying balance settlement on completion:', err);
+      }
 
       // Send push notification to client
       await notificationService.notifyOrderCompleted(order.client_id, orderId, order.price);
@@ -214,6 +286,24 @@ class ExecutorService {
     );
 
     return result.rows.length > 0 ? result.rows[0] : null;
+  }
+
+  /**
+   * Create withdrawal request
+   */
+  async createWithdrawalRequest(
+    executorId: string,
+    data: { amount: number; bank_name: string; account_number: string }
+  ): Promise<any> {
+    const result = await pool.query(
+      `INSERT INTO withdrawals (
+        executor_id, amount, bank_name, account_number, status, requested_at
+      ) VALUES ($1, $2, $3, $4, $5, NOW())
+      RETURNING *`,
+      [executorId, data.amount, data.bank_name, data.account_number, 'pending']
+    );
+
+    return result.rows[0];
   }
 }
 

@@ -17,8 +17,6 @@ import {
 import { globalLimiter, apiLimiter } from './middleware/rateLimiter';
 import { corsMiddleware } from './middleware/cors';
 
-// @ts-ignore - untyped module
-import xss from 'xss-clean';
 import authRoutes from './routes/authRoutes';
 import orderRoutes from './routes/orderRoutes';
 import profileRoutes from './routes/profileRoutes';
@@ -27,6 +25,9 @@ import notificationRoutes from './routes/notificationRoutes';
 import supportRoutes from './routes/supportRoutes';
 import adminRoutes from './routes/adminRoutes';
 import webhookRoutes from './routes/webhookRoutes';
+import paymentService from './services/paymentService';
+import notificationService from './services/notificationService';
+import yookassaService from './services/yookassaService';
 
 dotenv.config();
 
@@ -42,7 +43,7 @@ const io = new SocketIOServer(httpServer, {
   },
 });
 
-const PORT = process.env.PORT || 3000;
+const BASE_PORT = Number(process.env.PORT || 3000);
 
 // Middleware
 // Enforce HTTPS in production (behind proxy/load balancer)
@@ -61,7 +62,6 @@ app.use('/api', apiLimiter);
 
 // Basic input sanitization and protections
 app.use(sanitizeData);
-app.use(xss());
 app.use(hpp());
 app.use(sanitizeInput);
 
@@ -85,10 +85,10 @@ app.get('/health', async (_req, res) => {
     await pool.query('SELECT NOW()');
     
     // Check Firebase status
-    const firebaseStatus = (await import('./services/notificationService')).default.getStatus();
+    const firebaseStatus = notificationService.getStatus();
     
     // Check YooKassa status
-    const yookassaStatus = (await import('./services/yookassaService')).default.isConfigured();
+    const yookassaStatus = yookassaService.isConfigured();
     
     res.json({ 
       status: 'ok', 
@@ -123,6 +123,9 @@ app.use('/api/orders', orderRoutes);
 // Profile routes
 app.use('/api/profile', profileRoutes);
 
+// Webhook routes (no auth required)
+app.use('/api/webhooks', webhookRoutes);
+
 // Account management routes (direct access)
 app.use('/api', profileRoutes);
 
@@ -138,9 +141,6 @@ app.use('/api/support', supportRoutes);
 // Admin routes
 app.use('/api/admin', adminRoutes);
 
-// Webhook routes (no auth required)
-app.use('/api/webhooks', webhookRoutes);
-
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
@@ -153,6 +153,35 @@ io.on('connection', (socket) => {
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
+const listenWithFallback = (startPort: number): Promise<number> => {
+  return new Promise((resolve, reject) => {
+    const tryPort = (port: number) => {
+      const onListening = () => {
+        httpServer.off('error', onError);
+        resolve(port);
+      };
+
+      const onError = (error: any) => {
+        httpServer.off('listening', onListening);
+
+        if (error?.code === 'EADDRINUSE') {
+          console.warn(`⚠️ Port ${port} is busy, trying ${port + 1}...`);
+          tryPort(port + 1);
+          return;
+        }
+
+        reject(error);
+      };
+
+      httpServer.once('listening', onListening);
+      httpServer.once('error', onError);
+      httpServer.listen(port);
+    };
+
+    tryPort(startPort);
+  });
+};
+
 // Test database connection and start server
 const startServer = async () => {
   try {
@@ -160,11 +189,13 @@ const startServer = async () => {
     await pool.query('SELECT NOW()');
     console.log('✅ Database connection successful');
 
-    httpServer.listen(PORT, () => {
-      console.log(`🚀 Server is running on port ${PORT}`);
-      console.log(`📡 WebSocket server is ready`);
-      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    });
+    // Start periodic sweep for expired SBP payments.
+    paymentService.startSbpTimeoutScheduler();
+
+    const activePort = await listenWithFallback(BASE_PORT);
+    console.log(`🚀 Server is running on port ${activePort}`);
+    console.log(`📡 WebSocket server is ready`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
