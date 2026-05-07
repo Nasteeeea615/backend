@@ -26,10 +26,10 @@ export const saveFCMToken = async (req: AuthRequest, res: Response) => {
       deviceId,
     });
 
-    return res.json({ success: true, message: 'FCM token saved successfully' });
+    return res.json({ success: true, message: 'Push token saved successfully' });
   } catch (error) {
     console.error('Error in saveFCMToken:', error);
-    return res.status(500).json({ error: 'Failed to save FCM token' });
+    return res.status(500).json({ error: 'Failed to save push token' });
   }
 };
 
@@ -48,10 +48,10 @@ export const removeFCMToken = async (req: AuthRequest, res: Response) => {
 
     await notificationService.removeFCMToken(userId, token);
 
-    return res.json({ success: true, message: 'FCM token removed successfully' });
+    return res.json({ success: true, message: 'Push token removed successfully' });
   } catch (error) {
     console.error('Error in removeFCMToken:', error);
-    return res.status(500).json({ error: 'Failed to remove FCM token' });
+    return res.status(500).json({ error: 'Failed to remove push token' });
   }
 };
 

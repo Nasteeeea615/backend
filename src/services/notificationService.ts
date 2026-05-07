@@ -1,52 +1,10 @@
-import admin from 'firebase-admin';
 import pool from '../config/database';
 import logger from '../utils/logger';
-
-// Initialize Firebase Admin SDK
-// Note: In production, use service account credentials from environment
-let firebaseInitialized = false;
-
-function initializeFirebase(): boolean {
-  if (admin.apps.length > 0) {
-    firebaseInitialized = true;
-    return true;
-  }
-
-  try {
-    const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT 
-      ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
-      : null;
-
-    if (!serviceAccount) {
-      logger.warn('Firebase Admin SDK not initialized: FIREBASE_SERVICE_ACCOUNT not found in environment');
-      logger.warn('Push notifications will not work. Please add FIREBASE_SERVICE_ACCOUNT to .env');
-      return false;
-    }
-
-    // Validate service account structure
-    if (!serviceAccount.project_id || !serviceAccount.private_key || !serviceAccount.client_email) {
-      logger.error('Invalid Firebase service account structure');
-      return false;
-    }
-
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
-
-    firebaseInitialized = true;
-    logger.info('✅ Firebase Admin SDK initialized successfully');
-    return true;
-  } catch (error: any) {
-    logger.error('❌ Error initializing Firebase Admin SDK:', {
-      error: error.message,
-      stack: error.stack,
-    });
-    return false;
-  }
-}
-
-// Try to initialize on module load
-initializeFirebase();
+import {
+  isValidExpoPushToken,
+  processNotificationReceipts,
+  sendBatchPushNotifications,
+} from './expoPushNotifications';
 
 export interface NotificationPayload {
   userId: string;
@@ -65,7 +23,7 @@ export interface FCMTokenData {
 
 class NotificationService {
   /**
-   * Save FCM token for a user
+  * Save push token for a user
    */
   async saveFCMToken(tokenData: FCMTokenData): Promise<void> {
     const { userId, token, deviceType, deviceId } = tokenData;
@@ -94,15 +52,15 @@ class NotificationService {
         [userId, token, deviceType, deviceId]
       );
 
-      console.log(`FCM token saved for user ${userId}`);
+      console.log(`Push token saved for user ${userId}`);
     } catch (error) {
-      console.error('Error saving FCM token:', error);
+      console.error('Error saving push token:', error);
       throw error;
     }
   }
 
   /**
-   * Remove FCM token
+   * Remove push token
    */
   async removeFCMToken(userId: string, token: string): Promise<void> {
     try {
@@ -113,15 +71,15 @@ class NotificationService {
         [userId, token]
       );
 
-      console.log(`FCM token removed for user ${userId}`);
+      console.log(`Push token removed for user ${userId}`);
     } catch (error) {
-      console.error('Error removing FCM token:', error);
+      console.error('Error removing push token:', error);
       throw error;
     }
   }
 
   /**
-   * Get active FCM tokens for a user
+   * Get active push tokens for a user
    */
   async getUserTokens(userId: string): Promise<string[]> {
     try {
@@ -169,62 +127,52 @@ class NotificationService {
       // Save notification to database (always save, even if push fails)
       const notificationId = await this.saveNotification(payload);
 
-      // Check if Firebase is initialized
-      if (!firebaseInitialized) {
-        logger.warn('Firebase not initialized, skipping push notification', {
-          userId,
-          type: payload.type,
-        });
-        return;
-      }
-
-      // Get user's FCM tokens
-      const tokens = await this.getUserTokens(userId);
+      // Get user's Expo push tokens
+      const tokens = (await this.getUserTokens(userId)).filter(isValidExpoPushToken);
 
       if (tokens.length === 0) {
-        logger.debug(`No active FCM tokens found for user ${userId}`);
+        logger.debug(`No active Expo push tokens found for user ${userId}`);
         return;
       }
 
-      // Prepare FCM message
-      const message: admin.messaging.MulticastMessage = {
-        notification: {
+      // Send notifications via official Expo Push API
+      const tickets = await sendBatchPushNotifications(
+        tokens.map(token => ({
+          to: token,
           title,
           body,
-        },
-        data: {
-          ...data,
-          notificationId,
-          type: payload.type,
-        },
-        tokens,
-      };
+          data: {
+            ...data,
+            notificationId,
+            type: payload.type,
+          },
+          sound: 'default',
+          priority: 'high',
+        }))
+      );
 
-      // Send notification
-      const response = await admin.messaging().sendEachForMulticast(message);
+      const ticketIds = tickets
+        .filter(ticket => ticket.status === 'ok' && ticket.id)
+        .map(ticket => ticket.id as string);
 
-      // Handle failed tokens
-      if (response.failureCount > 0) {
-        const failedTokens: string[] = [];
-        response.responses.forEach((resp, idx) => {
-          if (!resp.success) {
-            failedTokens.push(tokens[idx]);
-            logger.error(`Failed to send to token ${tokens[idx]}:`, {
-              error: resp.error?.message,
-            });
+      if (ticketIds.length > 0) {
+        const receipts = await processNotificationReceipts(ticketIds);
+
+        if (receipts.invalidTokens.length > 0) {
+          logger.warn('Removing invalid Expo push tokens', {
+            userId,
+            count: receipts.invalidTokens.length,
+          });
+
+          for (const token of receipts.invalidTokens) {
+            await this.removeFCMToken(userId, token);
           }
-        });
-
-        // Deactivate failed tokens
-        for (const token of failedTokens) {
-          await this.removeFCMToken(userId, token);
         }
       }
 
       logger.info(`Push notification sent to user ${userId}`, {
         type: payload.type,
-        successCount: response.successCount,
-        failureCount: response.failureCount,
+        tokenCount: tokens.length,
       });
     } catch (error: any) {
       logger.error('Error sending push notification:', {

@@ -5,7 +5,6 @@ import logger from './logger';
  */
 export function validateEnvironment(): void {
   const redisConfigured = !!(process.env.REDIS_URL || process.env.REDIS_HOST);
-  const firebaseConfigured = !!process.env.FIREBASE_SERVICE_ACCOUNT;
   const paymentConfigured = !!(process.env.YOOKASSA_SHOP_ID && process.env.YOOKASSA_SECRET_KEY);
   const emailConfigured = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 
@@ -23,7 +22,6 @@ export function validateEnvironment(): void {
   const optional = [
     'YOOKASSA_SHOP_ID',
     'YOOKASSA_SECRET_KEY',
-    'FIREBASE_SERVICE_ACCOUNT',
     'REDIS_HOST',
     'REDIS_URL',
     'SMTP_HOST',
@@ -65,9 +63,6 @@ export function validateEnvironment(): void {
     if (!paymentConfigured) {
       logger.warn('  - YooKassa: Real payments will not work (using mock)');
     }
-    if (!firebaseConfigured) {
-      logger.warn('  - Firebase: Push notifications will not work');
-    }
     if (!redisConfigured) {
       logger.warn('  - Redis: Using in-memory cache (not recommended for production)');
     }
@@ -94,7 +89,6 @@ export function getEnvironmentInfo(): Record<string, any> {
     },
     services: {
       yookassa: paymentConfigured,
-      firebase: firebaseConfigured,
       redis: redisConfigured,
       email: emailConfigured,
     },
