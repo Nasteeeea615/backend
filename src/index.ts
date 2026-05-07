@@ -88,7 +88,7 @@ app.get('/health', async (_req, res) => {
     const firebaseStatus = notificationService.getStatus();
     
     // Check YooKassa status
-    const yookassaStatus = yookassaService.isConfigured();
+    const yookassaStatus = yookassaService.getMode();
     
     res.json({ 
       status: 'ok', 
@@ -97,7 +97,7 @@ app.get('/health', async (_req, res) => {
       services: {
         database: 'connected',
         firebase: firebaseStatus.initialized ? 'initialized' : 'not_configured',
-        yookassa: yookassaStatus ? 'configured' : 'not_configured',
+        yookassa: yookassaStatus,
       }
     });
   } catch (error: any) {

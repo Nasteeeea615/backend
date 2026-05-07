@@ -59,8 +59,10 @@ interface PayoutParams {
 class YooKassaService {
   private client: AxiosInstance;
   private config: YooKassaConfig;
+  private testMode: boolean;
 
   constructor() {
+    this.testMode = process.env.YOOKASSA_TEST_MODE === 'true';
     this.config = {
       shopId: process.env.YOOKASSA_SHOP_ID || '',
       secretKey: process.env.YOOKASSA_SECRET_KEY || '',
@@ -70,7 +72,11 @@ class YooKassaService {
 
     // Validate configuration
     if (!this.config.shopId || !this.config.secretKey) {
-      logger.warn('YooKassa credentials not configured. Payment functionality will not work.');
+      if (this.testMode) {
+        logger.info('YooKassa test mode enabled. Add test shop credentials to use sandbox payments.');
+      } else {
+        logger.warn('YooKassa credentials not configured. Payment functionality will not work.');
+      }
     }
 
     // Create axios instance with basic auth
@@ -341,6 +347,17 @@ class YooKassaService {
    */
   isConfigured(): boolean {
     return !!(this.config.shopId && this.config.secretKey);
+  }
+
+  /**
+   * Get current YooKassa mode for health checks and diagnostics.
+   */
+  getMode(): 'production' | 'test' | 'not_configured' {
+    if (this.isConfigured()) {
+      return this.testMode ? 'test' : 'production';
+    }
+
+    return this.testMode ? 'test' : 'not_configured';
   }
 }
 

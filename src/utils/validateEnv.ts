@@ -5,6 +5,8 @@ import logger from './logger';
  */
 export function validateEnvironment(): void {
   const redisConfigured = !!(process.env.REDIS_URL || process.env.REDIS_HOST);
+  const yookassaTestMode = process.env.YOOKASSA_TEST_MODE === 'true';
+  const yookassaConfigured = !!(process.env.YOOKASSA_SHOP_ID && process.env.YOOKASSA_SECRET_KEY) || yookassaTestMode;
   const paymentConfigured = !!(process.env.YOOKASSA_SHOP_ID && process.env.YOOKASSA_SECRET_KEY);
   const emailConfigured = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 
@@ -22,6 +24,7 @@ export function validateEnvironment(): void {
   const optional = [
     'YOOKASSA_SHOP_ID',
     'YOOKASSA_SECRET_KEY',
+    'YOOKASSA_TEST_MODE',
     'REDIS_HOST',
     'REDIS_URL',
     'SMTP_HOST',
@@ -44,6 +47,10 @@ export function validateEnvironment(): void {
 
   // Check optional but important variables
   for (const key of optional) {
+    if (yookassaTestMode && (key === 'YOOKASSA_SHOP_ID' || key === 'YOOKASSA_SECRET_KEY')) {
+      continue;
+    }
+
     if (!process.env[key]) {
       notConfigured.push(key);
     }
@@ -60,8 +67,10 @@ export function validateEnvironment(): void {
     logger.warn('⚠️  Optional services not configured:', notConfigured);
     logger.warn('Some features may not work:');
     
-    if (!paymentConfigured) {
+    if (!yookassaConfigured) {
       logger.warn('  - YooKassa: Real payments will not work (using mock)');
+    } else if (yookassaTestMode && !paymentConfigured) {
+      logger.info('  - YooKassa: Test mode enabled (sandbox payments)');
     }
     if (!redisConfigured) {
       logger.warn('  - Redis: Using in-memory cache (not recommended for production)');
@@ -79,16 +88,23 @@ export function validateEnvironment(): void {
  * Get environment info for debugging
  */
 export function getEnvironmentInfo(): Record<string, any> {
+  const yookassaTestMode = process.env.YOOKASSA_TEST_MODE === 'true';
+  const yookassaConfigured = !!(process.env.YOOKASSA_SHOP_ID && process.env.YOOKASSA_SECRET_KEY) || yookassaTestMode;
+  const redisConfigured = !!(process.env.REDIS_URL || process.env.REDIS_HOST);
+  const emailConfigured = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+
   return {
     nodeEnv: process.env.NODE_ENV || 'development',
     port: process.env.PORT || 3000,
+    yookassaTestMode,
+    yookassaConfigured,
     database: {
       host: process.env.DB_HOST,
       port: process.env.DB_PORT,
       name: process.env.DB_NAME,
     },
     services: {
-      yookassa: paymentConfigured,
+      yookassa: yookassaConfigured,
       redis: redisConfigured,
       email: emailConfigured,
     },
