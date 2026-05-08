@@ -322,25 +322,14 @@ class NotificationService {
   }
 
   /**
-   * Check if Firebase is initialized and ready
-   */
-  isFirebaseInitialized(): boolean {
-    return firebaseInitialized;
-  }
-
-  /**
-   * Get Firebase initialization status for health checks
+   * Get push notification status for health checks.
+   *
+   * We use Expo Push API now, so there is no Firebase dependency to initialize.
    */
   getStatus(): { initialized: boolean; message: string } {
-    if (firebaseInitialized) {
-      return {
-        initialized: true,
-        message: 'Firebase Admin SDK is initialized and ready',
-      };
-    }
     return {
-      initialized: false,
-      message: 'Firebase Admin SDK is not initialized. Push notifications will not work.',
+      initialized: true,
+      message: 'Expo Push API is available and ready',
     };
   }
 }

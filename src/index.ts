@@ -84,8 +84,8 @@ app.get('/health', async (_req, res) => {
     // Check database connection
     await pool.query('SELECT NOW()');
     
-    // Check Firebase status
-    const firebaseStatus = notificationService.getStatus();
+    // Check push notification status
+    const pushStatus = notificationService.getStatus();
     
     // Check YooKassa status
     const yookassaStatus = yookassaService.getMode();
@@ -96,7 +96,7 @@ app.get('/health', async (_req, res) => {
       timestamp: new Date().toISOString(),
       services: {
         database: 'connected',
-        firebase: firebaseStatus.initialized ? 'initialized' : 'not_configured',
+        pushNotifications: pushStatus.initialized ? 'available' : 'not_configured',
         yookassa: yookassaStatus,
       }
     });
