@@ -41,23 +41,37 @@ class EmailService {
       };
     }
 
-    await this.transporter.sendMail({
-      from: this.fromAddress,
-      to: email,
-      subject: 'Код входа в Септик Сервис',
-      text: `Ваш код входа: ${code}. Он действует 10 минут.`,
-      html: `
-        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937;">
-          <h2>Код входа</h2>
-          <p>Ваш код подтверждения:</p>
-          <div style="font-size: 28px; font-weight: 700; letter-spacing: 6px; margin: 16px 0;">${code}</div>
-          <p>Код действует 10 минут.</p>
-          ${role ? `<p>Роль: ${role}</p>` : ''}
-        </div>
-      `,
-    });
+    try {
+      await this.transporter.sendMail({
+        from: this.fromAddress,
+        to: email,
+        subject: 'Код входа в Септик Сервис',
+        text: `Ваш код входа: ${code}. Он действует 10 минут.`,
+        html: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937;">
+            <h2>Код входа</h2>
+            <p>Ваш код подтверждения:</p>
+            <div style="font-size: 28px; font-weight: 700; letter-spacing: 6px; margin: 16px 0;">${code}</div>
+            <p>Код действует 10 минут.</p>
+            ${role ? `<p>Роль: ${role}</p>` : ''}
+          </div>
+        `,
+      });
 
-    return { sent: true };
+      logger.info('Login code sent via email', { email, role });
+      return { sent: true };
+    } catch (error: any) {
+      logger.error('Failed to send login code via email', {
+        email,
+        error: error.message,
+      });
+
+      // Fallback: return code for development/testing
+      return {
+        sent: false,
+        debugCode: code,
+      };
+    }
   }
 }
 
