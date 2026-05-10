@@ -17,6 +17,8 @@ class EmailService {
         host,
         port: parseInt(process.env.SMTP_PORT || '587', 10),
         secure: process.env.SMTP_SECURE === 'true',
+        connectionTimeout: 5000,
+        socketTimeout: 5000,
         auth: {
           user,
           pass,
@@ -42,7 +44,8 @@ class EmailService {
     }
 
     try {
-      await this.transporter.sendMail({
+      // Wrap sendMail with a timeout promise
+      const sendPromise = this.transporter.sendMail({
         from: this.fromAddress,
         to: email,
         subject: 'Код входа в Септик Сервис',
@@ -57,6 +60,12 @@ class EmailService {
           </div>
         `,
       });
+
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Email send timeout (10s)')), 10000)
+      );
+
+      await Promise.race([sendPromise, timeoutPromise]);
 
       logger.info('Login code sent via email', { email, role });
       return { sent: true };
