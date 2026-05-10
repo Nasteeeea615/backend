@@ -46,7 +46,7 @@ class AuthController {
         message: 'Verification code sent',
         email,
         expiresInMinutes: parseInt(process.env.LOGIN_CODE_TTL_MINUTES || '10', 10),
-        ...(delivery.debugCode && process.env.NODE_ENV !== 'production'
+        ...(delivery.debugCode
           ? { debugCode: delivery.debugCode }
           : {}),
       },
