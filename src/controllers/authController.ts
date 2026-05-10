@@ -20,13 +20,17 @@ class AuthController {
    */
   requestCode = asyncHandler(async (req: Request, res: Response) => {
     const data: RequestLoginCodeDTO = req.body;
+    console.log('📧 [requestCode] START', { email: data.email });
 
     if (!data.email) {
       throw new AppError('MISSING_REQUIRED_FIELD', 'Email is required', 400);
     }
 
     const email = data.email.trim().toLowerCase();
+    console.log('📧 [requestCode] EMAIL NORMALIZED', { email });
+
     const user = await userService.findByEmail(email);
+    console.log('📧 [requestCode] USER FOUND', { userId: user?.id, email });
 
     if (!user) {
       throw new AppError('USER_NOT_FOUND', 'User with this email was not found', 404);
@@ -37,8 +41,13 @@ class AuthController {
     }
 
     const code = loginCodeService.generateCode();
+    console.log('📧 [requestCode] CODE GENERATED', { code });
+
     await loginCodeService.storeCode(email, code, data.role || user.role);
+    console.log('📧 [requestCode] CODE STORED');
+
     const delivery = await emailService.sendLoginCode(email, code, data.role || user.role);
+    console.log('📧 [requestCode] EMAIL SENT', { sent: delivery.sent, hasDebugCode: !!delivery.debugCode });
 
     const response: APIResponse = {
       success: true,
