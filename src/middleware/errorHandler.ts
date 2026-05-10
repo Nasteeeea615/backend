@@ -97,6 +97,13 @@ export const errorHandler = (
 
   // Неизвестная ошибка
   logger.error('Unhandled error:', err);
+  console.error('🔴 FULL ERROR:', {
+    message: err.message,
+    stack: err.stack,
+    name: err.name,
+    url: req.url,
+    method: req.method,
+  });
 
   const response: ErrorResponse = {
     code: ErrorCode.INTERNAL_SERVER_ERROR,
