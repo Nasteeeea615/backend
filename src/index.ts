@@ -29,7 +29,13 @@ import paymentService from './services/paymentService';
 import notificationService from './services/notificationService';
 import yookassaService from './services/yookassaService';
 
-dotenv.config();
+// Load local .env only in non-production to avoid overriding platform-provided env vars
+if (process.env.NODE_ENV !== 'production') {
+  dotenv.config();
+} else {
+  // In production we avoid loading local .env to prevent accidental overrides
+  // (Render and other platforms provide env vars directly)
+}
 
 // Validate environment variables
 validateEnvironment();
@@ -55,6 +61,16 @@ app.use(securityHeaders);
 
 // CORS with whitelist
 app.use(corsMiddleware);
+
+// Lightweight health check placed before rate limiting (avoids Redis dependency)
+app.get('/health', async (_req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    return res.json({ status: 'ok', message: 'Server is running (light)' });
+  } catch (error: any) {
+    return res.status(503).json({ status: 'error', message: 'DB unavailable', error: error.message });
+  }
+});
 
 // Global rate limiting and API rate limiting
 app.use(globalLimiter);
