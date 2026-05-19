@@ -11,28 +11,29 @@ import rateLimit from 'express-rate-limit';
 // @ts-ignore - untyped module
 import RedisStore from 'rate-limit-redis';
 import { Redis } from 'ioredis';
+import { initRedis, getRedis } from '../utils/cache';
 
-const shouldUseRedisStore =
-    process.env.RATE_LIMIT_STORE === 'redis' || process.env.NODE_ENV === 'production';
+const shouldUseRedisStore = process.env.RATE_LIMIT_STORE === 'redis' || process.env.NODE_ENV === 'production';
 
-const redisUrl = process.env.REDIS_URL;
-
+// Initialize or reuse the shared Redis client from cache utils when using Redis for rate limiting
 let redis: Redis | null = null;
-
 if (shouldUseRedisStore) {
-    // Redis client для rate limiting
-    redis = redisUrl
-        ? new Redis(redisUrl)
-        : new Redis({
-            host: process.env.REDIS_HOST || 'localhost',
-            port: parseInt(process.env.REDIS_PORT || '6379'),
-            password: process.env.REDIS_PASSWORD,
+    try {
+        // Ensure a single Redis client is initialized for the app
+        initRedis();
+        redis = getRedis();
+        redis.on('error', (err) => {
+            console.error('[Rate Limiter] Redis error:', err);
         });
 
-    // Обработка ошибок Redis
-    redis.on('error', (err) => {
-        console.error('[Rate Limiter] Redis error:', err);
-    });
+        if ((redis as any).status !== 'ready') {
+            console.warn('[Rate Limiter] Redis client not ready, falling back to in-memory store', { status: (redis as any).status });
+            redis = null;
+        }
+    } catch (e: any) {
+        console.warn('[Rate Limiter] Failed to initialize shared Redis client, using in-memory store', e?.message || e);
+        redis = null;
+    }
 } else {
     console.warn('[Rate Limiter] Using in-memory store (Redis disabled in this environment)');
 }
@@ -61,16 +62,36 @@ const baseConfig = {
     skipFailedRequests: false,
 };
 
-const createRedisStore = (prefix: string) => new RedisStore({
-    sendCommand: ((...args: string[]) => (redis as Redis).call(args[0], ...args.slice(1))) as any,
-    prefix,
-});
+const storeCache = new Map<string, any>();
+
+const createRedisStore = (prefix: string) => {
+    if (!redis) throw new Error('No redis client');
+    if (storeCache.has(prefix)) return storeCache.get(prefix);
+
+    // Prefer passing the shared ioredis client to avoid creating new connections
+    const store = new RedisStore({
+        client: redis as any,
+        prefix,
+    });
+
+    storeCache.set(prefix, store);
+    return store;
+};
 
 const withStore = (prefix: string) => {
     if (!redis) {
         return {};
     }
-    return { store: createRedisStore(prefix) };
+    // Только если клиент готов
+    if ((redis as any).status !== 'ready') {
+        return {};
+    }
+    try {
+        return { store: createRedisStore(prefix) };
+    } catch (err: any) {
+        console.warn('[Rate Limiter] Failed to create RedisStore, using in-memory store', err?.message || err);
+        return {};
+    }
 };
 
 // 1. Глобальный rate limiter (для всех запросов)
