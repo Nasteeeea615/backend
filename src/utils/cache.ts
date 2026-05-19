@@ -18,6 +18,11 @@ export const initRedis = (): Redis | null => {
   // Проверяем, нужно ли использовать mock
   const redisUrl = process.env.REDIS_URL;
 
+  // Если уже инициализирован, вернуть существующий клиент (идемпотентность)
+  if (redis) {
+    return redis;
+  }
+
   if (process.env.USE_MOCK_CACHE === 'true' || (!process.env.REDIS_HOST && !redisUrl)) {
     logger.info('Using Mock Cache (in-memory) instead of Redis');
     useMockCache = true;
@@ -25,7 +30,21 @@ export const initRedis = (): Redis | null => {
   }
 
   try {
-    redis = redisUrl
+    // If REDIS_USE_TLS is explicitly set or URL uses rediss://, enable TLS options
+    const useTls = process.env.REDIS_USE_TLS === 'true' || (redisUrl && redisUrl.startsWith('rediss://'));
+    // Log the host we will attempt to connect to (mask credentials)
+    try {
+      if (redisUrl) {
+        const parsed = new URL(redisUrl);
+        logger.info('Attempting Redis connection', { host: parsed.hostname, port: parsed.port || 'default', tls: useTls });
+      } else {
+        logger.info('Attempting Redis connection', { host: process.env.REDIS_HOST || 'localhost', port: process.env.REDIS_PORT || '6379', tls: useTls });
+      }
+    } catch (e) {
+      logger.warn('Failed to parse REDIS_URL for logging', { error: (e as any)?.message || e });
+    }
+
+      redis = redisUrl
       ? new Redis(redisUrl, {
           db: parseInt(process.env.REDIS_DB || '0'),
           retryStrategy: (times) => {
@@ -39,6 +58,8 @@ export const initRedis = (): Redis | null => {
           },
           maxRetriesPerRequest: 3,
           lazyConnect: true,
+          enableOfflineQueue: false,
+          tls: useTls ? { rejectUnauthorized: process.env.REDIS_TLS_REJECT_UNAUTHORIZED !== 'false' } : undefined,
         })
       : new Redis({
           host: process.env.REDIS_HOST || 'localhost',
@@ -57,6 +78,7 @@ export const initRedis = (): Redis | null => {
           },
           maxRetriesPerRequest: 3,
           lazyConnect: true, // Не подключаемся сразу
+          enableOfflineQueue: false,
         });
 
     redis.on('connect', () => {
@@ -116,11 +138,20 @@ export const closeRedis = async (): Promise<void> => {
  * Кэширование с TTL (Time To Live)
  */
 export class CacheService {
-  private redis: Redis;
+  private redis: Redis | null;
   private defaultTTL: number = 3600; // 1 час по умолчанию
 
   constructor(redisClient?: Redis) {
-    this.redis = redisClient || getRedis();
+    if (redisClient) {
+      this.redis = redisClient;
+    } else {
+      try {
+        this.redis = getRedis();
+      } catch (err: any) {
+        this.redis = null;
+        logger.warn('CacheService: Redis not initialized yet, using Mock Cache until available', { error: err?.message || err });
+      }
+    }
   }
 
   /**
@@ -129,7 +160,7 @@ export class CacheService {
   async set(key: string, value: any, ttl?: number): Promise<void> {
     try {
       // Используем mock cache если Redis недоступен
-      if (useMockCache) {
+      if (useMockCache || !this.redis) {
         return mockCache.set(key, value, ttl || this.defaultTTL);
       }
 
@@ -153,7 +184,7 @@ export class CacheService {
   async get<T = any>(key: string): Promise<T | null> {
     try {
       // Используем mock cache если Redis недоступен
-      if (useMockCache) {
+      if (useMockCache || !this.redis) {
         return mockCache.get(key);
       }
 
@@ -183,7 +214,7 @@ export class CacheService {
    */
   async del(key: string): Promise<void> {
     try {
-      if (useMockCache) {
+      if (useMockCache || !this.redis) {
         return mockCache.del(key);
       }
 
@@ -203,6 +234,11 @@ export class CacheService {
    */
   async delPattern(pattern: string): Promise<void> {
     try {
+      if (!this.redis || useMockCache) {
+        logger.info('delPattern: using mock cache or no redis available', { pattern });
+        return;
+      }
+
       const keys = await this.redis.keys(pattern);
       if (keys.length > 0) {
         await this.redis.del(...keys);
@@ -218,6 +254,7 @@ export class CacheService {
    */
   async exists(key: string): Promise<boolean> {
     try {
+      if (!this.redis || useMockCache) return false;
       const result = await this.redis.exists(key);
       return result === 1;
     } catch (error) {
@@ -254,6 +291,7 @@ export class CacheService {
    */
   async incr(key: string): Promise<number> {
     try {
+      if (!this.redis || useMockCache) return 0;
       return await this.redis.incr(key);
     } catch (error) {
       logger.error('Cache incr error', { key, error });
@@ -266,6 +304,7 @@ export class CacheService {
    */
   async decr(key: string): Promise<number> {
     try {
+      if (!this.redis || useMockCache) return 0;
       return await this.redis.decr(key);
     } catch (error) {
       logger.error('Cache decr error', { key, error });
@@ -278,6 +317,7 @@ export class CacheService {
    */
   async expire(key: string, ttl: number): Promise<void> {
     try {
+      if (!this.redis || useMockCache) return;
       await this.redis.expire(key, ttl);
     } catch (error) {
       logger.error('Cache expire error', { key, error });
@@ -289,6 +329,7 @@ export class CacheService {
    */
   async ttl(key: string): Promise<number> {
     try {
+      if (!this.redis || useMockCache) return -1;
       return await this.redis.ttl(key);
     } catch (error) {
       logger.error('Cache ttl error', { key, error });
@@ -301,6 +342,7 @@ export class CacheService {
    */
   async flush(): Promise<void> {
     try {
+      if (!this.redis || useMockCache) return;
       await this.redis.flushdb();
       logger.warn('Cache flushed');
     } catch (error) {
