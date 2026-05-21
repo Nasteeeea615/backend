@@ -28,6 +28,7 @@ export interface ExecutorProfile {
   is_working: boolean;
   rating: number;
   completed_orders_count: number;
+  balance?: number;
 }
 
 // Order types
@@ -143,6 +144,7 @@ export interface CreateOrderDTO {
 }
 
 export interface RegisterClientDTO {
+  email: string;
   phone_number: string;
   name: string;
   city: string;
@@ -152,6 +154,7 @@ export interface RegisterClientDTO {
 }
 
 export interface RegisterExecutorDTO {
+  email: string;
   phone_number: string;
   name: string;
   vehicle_number: string;

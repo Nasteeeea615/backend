@@ -60,27 +60,54 @@ class UserService {
       throw new AppError('USER_NOT_FOUND', 'User not found', 404);
     }
 
-    if (user.role === 'client') {
-      const profileResult = await pool.query(
-        'SELECT * FROM client_profiles WHERE user_id = $1',
-        [userId]
-      );
-      return {
-        ...user,
-        clientProfile: profileResult.rows[0] || null,
-      };
-    } else if (user.role === 'executor') {
-      const profileResult = await pool.query(
-        'SELECT * FROM executor_profiles WHERE user_id = $1',
-        [userId]
-      );
-      return {
-        ...user,
-        executorProfile: profileResult.rows[0] || null,
-      };
-    }
+    const clientProfileResult = await pool.query(
+      'SELECT * FROM client_profiles WHERE user_id = $1',
+      [userId]
+    );
+    const executorProfileResult = await pool.query(
+      'SELECT * FROM executor_profiles WHERE user_id = $1',
+      [userId]
+    );
 
-    return user;
+    return {
+      ...user,
+      clientProfile: clientProfileResult.rows[0] || null,
+      executorProfile: executorProfileResult.rows[0] || null,
+    };
+  }
+
+  async hasClientProfile(userId: string): Promise<boolean> {
+    const result = await pool.query('SELECT user_id FROM client_profiles WHERE user_id = $1', [userId]);
+    return result.rows.length > 0;
+  }
+
+  async hasExecutorProfile(userId: string): Promise<boolean> {
+    const result = await pool.query('SELECT user_id FROM executor_profiles WHERE user_id = $1', [userId]);
+    return result.rows.length > 0;
+  }
+
+  async addClientProfile(userId: string, data: RegisterClientDTO): Promise<void> {
+    await pool.query(
+      `INSERT INTO client_profiles (user_id, city, street, house_number)
+       VALUES ($1, $2, $3, $4)`,
+      [userId, data.city, data.street, data.house_number]
+    );
+  }
+
+  async addExecutorProfile(userId: string, data: RegisterExecutorDTO): Promise<void> {
+    await pool.query(
+      `INSERT INTO executor_profiles (user_id, vehicle_number, vehicle_capacity, is_verified)
+       VALUES ($1, $2, $3, false)`,
+      [userId, data.vehicle_number, data.vehicle_capacity]
+    );
+  }
+
+  async updateRole(userId: string, role: 'client' | 'executor'): Promise<void> {
+    await pool.query('UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2', [role, userId]);
+  }
+
+  async updateEmail(userId: string, email: string): Promise<void> {
+    await pool.query('UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2', [email, userId]);
   }
 
   /**
@@ -93,10 +120,10 @@ class UserService {
 
       // Create user
       const userResult = await client.query(
-        `INSERT INTO users (phone_number, name, role) 
-         VALUES ($1, $2, 'client') 
+        `INSERT INTO users (phone_number, email, name, role)
+         VALUES ($1, $2, $3, 'client')
          RETURNING *`,
-        [data.phone_number, data.name]
+        [data.phone_number, data.email, data.name]
       );
 
       const user = userResult.rows[0];
@@ -128,10 +155,10 @@ class UserService {
 
       // Create user
       const userResult = await client.query(
-        `INSERT INTO users (phone_number, name, role) 
-         VALUES ($1, $2, 'executor') 
+        `INSERT INTO users (phone_number, email, name, role)
+         VALUES ($1, $2, $3, 'executor')
          RETURNING *`,
-        [data.phone_number, data.name]
+        [data.phone_number, data.email, data.name]
       );
 
       const user = userResult.rows[0];

@@ -141,9 +141,10 @@ class AuthController {
    */
   registerClient = asyncHandler(async (req: Request, res: Response) => {
     const data: RegisterClientDTO = req.body;
+    const normalizedEmail = data.email?.trim().toLowerCase();
 
     // Validate required fields
-    if (!data.phone_number || !data.name || !data.city || !data.street || !data.house_number) {
+    if (!normalizedEmail || !data.phone_number || !data.name || !data.city || !data.street || !data.house_number) {
       throw new AppError('MISSING_REQUIRED_FIELD', 'All fields are required', 400);
     }
 
@@ -151,14 +152,35 @@ class AuthController {
       throw new AppError('TERMS_NOT_AGREED', 'You must agree to terms and conditions', 400);
     }
 
+    const existingByEmail = await userService.findByEmail(normalizedEmail);
+
     // Check if user already exists
     const existingUser = await userService.findByPhoneNumber(data.phone_number);
-    if (existingUser) {
-      throw new AppError('USER_ALREADY_EXISTS', 'User with this phone number already exists', 400);
+    if (existingByEmail && (!existingUser || existingByEmail.id !== existingUser.id)) {
+      throw new AppError('USER_ALREADY_EXISTS', 'User with this email already exists', 400);
     }
 
-    // Register client
-    const user = await userService.registerClient(data);
+    let user;
+
+    if (existingUser) {
+      const hasClientProfile = await userService.hasClientProfile(existingUser.id);
+      if (hasClientProfile) {
+        throw new AppError('USER_ALREADY_EXISTS', 'User with this phone number already exists', 400);
+      }
+
+      await userService.addClientProfile(existingUser.id, { ...data, email: normalizedEmail });
+      await userService.updateEmail(existingUser.id, normalizedEmail);
+      await userService.updateRole(existingUser.id, 'client');
+
+      user = await userService.findById(existingUser.id);
+    } else {
+      // Register new client
+      user = await userService.registerClient({ ...data, email: normalizedEmail });
+    }
+
+    if (!user) {
+      throw new AppError('SERVER_ERROR', 'Failed to create user', 500);
+    }
 
     // Generate access token and set as HttpOnly cookie
     const token = jwtService.generateToken({ userId: user.id, role: user.role });
@@ -169,6 +191,7 @@ class AuthController {
     const response: APIResponse = {
       success: true,
       data: {
+        token,
         user: await userService.getUserWithProfile(user.id),
       },
     };
@@ -182,9 +205,10 @@ class AuthController {
    */
   registerExecutor = asyncHandler(async (req: Request, res: Response) => {
     const data: RegisterExecutorDTO = req.body;
+    const normalizedEmail = data.email?.trim().toLowerCase();
 
     // Validate required fields
-    if (!data.phone_number || !data.name || !data.vehicle_number || !data.vehicle_capacity) {
+    if (!normalizedEmail || !data.phone_number || !data.name || !data.vehicle_number || !data.vehicle_capacity) {
       throw new AppError('MISSING_REQUIRED_FIELD', 'All fields are required', 400);
     }
 
@@ -197,14 +221,35 @@ class AuthController {
       throw new AppError('INVALID_VEHICLE_CAPACITY', 'Vehicle capacity must be 3, 5, or 10', 400);
     }
 
+    const existingByEmail = await userService.findByEmail(normalizedEmail);
+
     // Check if user already exists
     const existingUser = await userService.findByPhoneNumber(data.phone_number);
-    if (existingUser) {
-      throw new AppError('USER_ALREADY_EXISTS', 'User with this phone number already exists', 400);
+    if (existingByEmail && (!existingUser || existingByEmail.id !== existingUser.id)) {
+      throw new AppError('USER_ALREADY_EXISTS', 'User with this email already exists', 400);
     }
 
-    // Register executor
-    const user = await userService.registerExecutor(data);
+    let user;
+
+    if (existingUser) {
+      const hasExecutorProfile = await userService.hasExecutorProfile(existingUser.id);
+      if (hasExecutorProfile) {
+        throw new AppError('USER_ALREADY_EXISTS', 'User with this phone number already exists', 400);
+      }
+
+      await userService.addExecutorProfile(existingUser.id, { ...data, email: normalizedEmail });
+      await userService.updateEmail(existingUser.id, normalizedEmail);
+      await userService.updateRole(existingUser.id, 'executor');
+
+      user = await userService.findById(existingUser.id);
+    } else {
+      // Register new executor
+      user = await userService.registerExecutor({ ...data, email: normalizedEmail });
+    }
+
+    if (!user) {
+      throw new AppError('SERVER_ERROR', 'Failed to create user', 500);
+    }
 
     // Generate access token and set as HttpOnly cookie
     const token = jwtService.generateToken({ userId: user.id, role: user.role });
@@ -214,6 +259,7 @@ class AuthController {
     const response: APIResponse = {
       success: true,
       data: {
+        token,
         user: await userService.getUserWithProfile(user.id),
         message: 'Registration successful. Your account is pending verification.',
       },

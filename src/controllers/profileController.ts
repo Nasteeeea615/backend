@@ -3,6 +3,7 @@ import { AuthRequest, APIResponse } from '../types';
 import { AppError, ErrorCode } from '../types/errors';
 import { asyncHandler } from '../middleware/errorHandler';
 import userService from '../services/userService';
+import jwtService from '../services/jwtService';
 import pool from '../config/database';
 
 class ProfileController {
@@ -97,12 +98,18 @@ class ProfileController {
       throw new AppError(ErrorCode.UNAUTHORIZED, 'Authentication required', 401);
     }
 
-    // Delete user (cascade will delete profiles)
-    await pool.query('DELETE FROM users WHERE id = $1', [req.user.id]);
+    // Soft-delete the account so foreign keys from orders and payments stay valid.
+    await pool.query(
+      `UPDATE users
+       SET is_blocked = TRUE,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [req.user.id]
+    );
 
     const response: APIResponse = {
       success: true,
-      data: { message: 'Account deleted successfully' },
+      data: { message: 'Account deactivated successfully' },
     };
 
     res.json(response);
@@ -117,35 +124,20 @@ class ProfileController {
       throw new AppError(ErrorCode.UNAUTHORIZED, 'Authentication required', 401);
     }
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+    await pool.query(
+      `UPDATE users
+       SET is_blocked = TRUE,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [req.user.id]
+    );
 
-      // Soft delete or mark orders as deleted for audit
-      await client.query(
-        `UPDATE orders 
-         SET status = 'deleted', updated_at = NOW() 
-         WHERE client_id = $1 OR executor_id = $1`,
-        [req.user.id]
-      );
+    const response: APIResponse = {
+      success: true,
+      data: { message: 'Account deactivated successfully' },
+    };
 
-      // Delete user (cascade will delete profiles)
-      await client.query('DELETE FROM users WHERE id = $1', [req.user.id]);
-
-      await client.query('COMMIT');
-
-      const response: APIResponse = {
-        success: true,
-        data: { message: 'Account deleted successfully' },
-      };
-
-      res.json(response);
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    res.json(response);
   });
 
   /**
@@ -167,13 +159,13 @@ class ProfileController {
 
     if (role === 'client') {
       const result = await pool.query(
-        'SELECT id FROM client_profiles WHERE user_id = $1',
+        'SELECT user_id FROM client_profiles WHERE user_id = $1',
         [req.user.id]
       );
       isRegistered = result.rows.length > 0;
     } else if (role === 'executor') {
       const result = await pool.query(
-        'SELECT id FROM executor_profiles WHERE user_id = $1',
+        'SELECT user_id FROM executor_profiles WHERE user_id = $1',
         [req.user.id]
       );
       isRegistered = result.rows.length > 0;
@@ -207,13 +199,13 @@ class ProfileController {
 
     if (newRole === 'client') {
       const result = await pool.query(
-        'SELECT id FROM client_profiles WHERE user_id = $1',
+        'SELECT user_id FROM client_profiles WHERE user_id = $1',
         [req.user.id]
       );
       isRegistered = result.rows.length > 0;
     } else if (newRole === 'executor') {
       const result = await pool.query(
-        'SELECT id FROM executor_profiles WHERE user_id = $1',
+        'SELECT user_id FROM executor_profiles WHERE user_id = $1',
         [req.user.id]
       );
       isRegistered = result.rows.length > 0;
@@ -237,16 +229,7 @@ class ProfileController {
     const user = await userService.getUserWithProfile(req.user.id);
 
     // Generate new JWT token with updated role
-    const jwt = require('jsonwebtoken');
-    const token = jwt.sign(
-      {
-        id: user.id,
-        phoneNumber: user.phone_number,
-        role: newRole,
-      },
-      process.env.JWT_SECRET || 'your-secret-key',
-      { expiresIn: process.env.JWT_EXPIRES_IN || '15m' }
-    );
+    const token = jwtService.generateToken({ userId: user.id, role: newRole });
 
     const response: APIResponse = {
       success: true,

@@ -72,7 +72,7 @@ const createRedisStore = (prefix: string) => {
     const store = new RedisStore({
         client: redis as any,
         prefix,
-    });
+    } as any);
 
     storeCache.set(prefix, store);
     return store;
