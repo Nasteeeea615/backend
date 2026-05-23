@@ -8,7 +8,13 @@ import {
 
 export interface NotificationPayload {
   userId: string;
-  type: 'order_accepted' | 'order_completed' | 'payment_success' | 'new_order' | 'ticket_reply';
+  type:
+    | 'order_accepted'
+    | 'order_completed'
+    | 'payment_success'
+    | 'new_order'
+    | 'ticket_reply'
+    | 'executor_verified';
   title: string;
   body: string;
   data?: Record<string, string>;
@@ -266,6 +272,21 @@ class NotificationService {
     });
   }
 
+
+  /**
+   * Send notification when executor is approved by admin
+   */
+  async notifyExecutorVerified(userId: string): Promise<void> {
+    await this.sendPushNotification({
+      userId,
+      type: 'executor_verified',
+      title: 'Аккаунт подтвержден',
+      body: 'Ваш аккаунт исполнителя подтвержден администратором. Теперь доступны основные функции.',
+      data: {
+        screen: 'ExecutorTabs',
+      },
+    });
+  }
   /**
    * Get user notifications
    */

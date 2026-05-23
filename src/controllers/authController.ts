@@ -29,24 +29,13 @@ class AuthController {
     const email = data.email.trim().toLowerCase();
     console.log('📧 [requestCode] EMAIL NORMALIZED', { email });
 
-    const user = await userService.findByEmail(email);
-    console.log('📧 [requestCode] USER FOUND', { userId: user?.id, email });
-
-    if (!user) {
-      throw new AppError('USER_NOT_FOUND', 'User with this email was not found', 404);
-    }
-
-    if (data.role && user.role !== data.role) {
-      throw new AppError('FORBIDDEN', 'This account does not have the required role', 403);
-    }
-
     const code = loginCodeService.generateCode();
     console.log('📧 [requestCode] CODE GENERATED', { code });
 
-    await loginCodeService.storeCode(email, code, data.role || user.role);
+    await loginCodeService.storeCode(email, code, data.role);
     console.log('📧 [requestCode] CODE STORED');
 
-    const delivery = await emailService.sendLoginCode(email, code, data.role || user.role);
+    const delivery = await emailService.sendLoginCode(email, code, data.role);
     console.log('📧 [requestCode] EMAIL SENT', { sent: delivery.sent, hasDebugCode: !!delivery.debugCode });
 
     const response: APIResponse = {
@@ -182,17 +171,12 @@ class AuthController {
       throw new AppError('SERVER_ERROR', 'Failed to create user', 500);
     }
 
-    // Generate access token and set as HttpOnly cookie
-    const token = jwtService.generateToken({ userId: user.id, role: user.role });
-
-    // Cookie options
-    res.cookie('access_token', token, buildCookieOptions());
-
     const response: APIResponse = {
       success: true,
       data: {
-        token,
         user: await userService.getUserWithProfile(user.id),
+        requiresVerification: true,
+        role: 'client',
       },
     };
 
@@ -251,17 +235,14 @@ class AuthController {
       throw new AppError('SERVER_ERROR', 'Failed to create user', 500);
     }
 
-    // Generate access token and set as HttpOnly cookie
-    const token = jwtService.generateToken({ userId: user.id, role: user.role });
-
-    res.cookie('access_token', token, buildCookieOptions());
-
     const response: APIResponse = {
       success: true,
       data: {
-        token,
         user: await userService.getUserWithProfile(user.id),
         message: 'Registration successful. Your account is pending verification.',
+        requiresVerification: true,
+        requiresAdminApproval: true,
+        role: 'executor',
       },
     };
 

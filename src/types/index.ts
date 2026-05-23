@@ -97,7 +97,13 @@ export interface Message {
 export interface Notification {
   id: string;
   user_id: string;
-  type: 'order_accepted' | 'order_completed' | 'payment_success' | 'new_order' | 'ticket_reply';
+  type:
+    | 'order_accepted'
+    | 'order_completed'
+    | 'payment_success'
+    | 'new_order'
+    | 'ticket_reply'
+    | 'executor_verified';
   title: string;
   body: string;
   data?: Record<string, any>;

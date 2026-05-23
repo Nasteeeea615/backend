@@ -5,6 +5,7 @@ import orderService from '../services/orderService';
 import userService from '../services/userService';
 import paymentService from '../services/paymentService';
 import supportService from '../services/supportService';
+import notificationService from '../services/notificationService';
 import pool from '../config/database';
 
 class AdminController {
@@ -351,6 +352,12 @@ class AdminController {
       throw new AppError('INVALID_USER_ROLE', 'User is not an executor', 400);
     }
 
+    const currentProfileResult = await pool.query(
+      'SELECT is_verified FROM executor_profiles WHERE user_id = $1',
+      [id]
+    );
+    const wasVerified = currentProfileResult.rows[0]?.is_verified === true;
+
     const result = await pool.query(
       'UPDATE executor_profiles SET is_verified = $1 WHERE user_id = $2 RETURNING *',
       [isVerified, id]
@@ -358,6 +365,10 @@ class AdminController {
 
     if (result.rows.length === 0) {
       throw new AppError('EXECUTOR_NOT_FOUND', 'Executor profile not found', 404);
+    }
+
+    if (isVerified && !wasVerified) {
+      await notificationService.notifyExecutorVerified(id);
     }
 
     const response: APIResponse = {
