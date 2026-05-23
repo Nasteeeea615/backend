@@ -155,28 +155,37 @@ class ProfileController {
       throw new AppError(ErrorCode.VALIDATION_ERROR, 'Invalid role', 400);
     }
 
-    let isRegistered = false;
+    try {
+      let isRegistered = false;
 
-    if (role === 'client') {
-      const result = await pool.query(
-        'SELECT user_id FROM client_profiles WHERE user_id = $1',
-        [req.user.id]
-      );
-      isRegistered = result.rows.length > 0;
-    } else if (role === 'executor') {
-      const result = await pool.query(
-        'SELECT user_id FROM executor_profiles WHERE user_id = $1',
-        [req.user.id]
-      );
-      isRegistered = result.rows.length > 0;
+      if (role === 'client') {
+        const result = await pool.query(
+          'SELECT user_id FROM client_profiles WHERE user_id = $1',
+          [req.user.id]
+        );
+        isRegistered = result.rows.length > 0;
+      } else if (role === 'executor') {
+        const result = await pool.query(
+          'SELECT user_id FROM executor_profiles WHERE user_id = $1',
+          [req.user.id]
+        );
+        isRegistered = result.rows.length > 0;
+      }
+
+      const response: APIResponse = {
+        success: true,
+        data: { isRegistered },
+      };
+
+      res.json(response);
+    } catch (error) {
+      console.error('profileController.checkRole error', {
+        userId: req.user?.id,
+        role,
+        error: (error as Error).stack || error,
+      });
+      throw error;
     }
-
-    const response: APIResponse = {
-      success: true,
-      data: { isRegistered },
-    };
-
-    res.json(response);
   });
 
   /**
