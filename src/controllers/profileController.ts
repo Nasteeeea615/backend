@@ -156,21 +156,15 @@ class ProfileController {
     }
 
     try {
-      let isRegistered = false;
+      // Find another user record with same email but requested role
+      const currentUser = await pool.query('SELECT email FROM users WHERE id = $1', [req.user.id]);
+      const email = currentUser.rows[0]?.email;
 
-      if (role === 'client') {
-        const result = await pool.query(
-          'SELECT user_id FROM client_profiles WHERE user_id = $1',
-          [req.user.id]
-        );
-        isRegistered = result.rows.length > 0;
-      } else if (role === 'executor') {
-        const result = await pool.query(
-          'SELECT user_id FROM executor_profiles WHERE user_id = $1',
-          [req.user.id]
-        );
-        isRegistered = result.rows.length > 0;
-      }
+      const result = await pool.query(
+        'SELECT id FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) AND role = $2',
+        [email, role]
+      );
+      const isRegistered = result.rows.length > 0;
 
       const response: APIResponse = {
         success: true,
@@ -203,24 +197,16 @@ class ProfileController {
       throw new AppError(ErrorCode.VALIDATION_ERROR, 'Invalid role', 400);
     }
 
-    // Check if user is registered in the new role
-    let isRegistered = false;
+    // Find the other user record with same email but requested role
+    const currentUser = await pool.query('SELECT email FROM users WHERE id = $1', [req.user.id]);
+    const email = currentUser.rows[0]?.email;
 
-    if (newRole === 'client') {
-      const result = await pool.query(
-        'SELECT user_id FROM client_profiles WHERE user_id = $1',
-        [req.user.id]
-      );
-      isRegistered = result.rows.length > 0;
-    } else if (newRole === 'executor') {
-      const result = await pool.query(
-        'SELECT user_id FROM executor_profiles WHERE user_id = $1',
-        [req.user.id]
-      );
-      isRegistered = result.rows.length > 0;
-    }
+    const targetUserResult = await pool.query(
+      'SELECT id FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) AND role = $2',
+      [email, newRole]
+    );
 
-    if (!isRegistered) {
+    if (targetUserResult.rows.length === 0) {
       throw new AppError(
         ErrorCode.NOT_REGISTERED,
         `User is not registered as ${newRole}`,
@@ -228,17 +214,13 @@ class ProfileController {
       );
     }
 
-    // Update user role
-    await pool.query('UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2', [
-      newRole,
-      req.user.id,
-    ]);
+    const targetUserId = targetUserResult.rows[0].id;
 
-    // Get updated user with profile
-    const user = await userService.getUserWithProfile(req.user.id);
+    // Get target user with profile
+    const user = await userService.getUserWithProfile(targetUserId);
 
-    // Generate new JWT token with updated role
-    const token = jwtService.generateToken({ userId: user.id, role: newRole });
+    // Generate new JWT token for the target user
+    const token = jwtService.generateToken({ userId: targetUserId, role: newRole });
 
     const response: APIResponse = {
       success: true,
