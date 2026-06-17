@@ -80,9 +80,12 @@ class OrderController {
 
     const id = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id || '');
 
-    // Check if order belongs to user
+    // Check if order belongs to user (client, executor on the order, or admin)
     const isOwner = await orderService.isOrderOwnedByClient(id, req.user.id);
-    if (!isOwner && req.user.role !== 'admin') {
+    const isExecutorOnOrder = req.user.role === 'executor'
+      ? await orderService.isOrderAssignedToExecutor(id, req.user.id)
+      : false;
+    if (!isOwner && !isExecutorOnOrder && req.user.role !== 'admin') {
       throw new AppError('FORBIDDEN', 'You do not have access to this order', 403);
     }
 

@@ -69,6 +69,40 @@ export const authorize = (...roles: string[]) => {
   };
 };
 
+/**
+ * Middleware to ensure executor has been approved by admin.
+ */
+export const requireVerifiedExecutor = async (
+  req: AuthRequest,
+  _res: Response,
+  next: NextFunction
+) => {
+  try {
+    if (!req.user) {
+      throw new AppError('UNAUTHORIZED', 'Authentication required', 401);
+    }
+
+    if (req.user.role !== 'executor') {
+      throw new AppError('FORBIDDEN', 'Executor role required', 403);
+    }
+
+    const user = await userService.getUserWithProfile(req.user.id);
+    const isVerified = user?.executorProfile?.is_verified === true;
+
+    if (!isVerified) {
+      throw new AppError(
+        'EXECUTOR_NOT_VERIFIED',
+        'Executor account is pending admin approval',
+        403
+      );
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
 function parseAccessTokenFromCookies(cookieHeader?: string): string | null {
   if (!cookieHeader) {
     return null;

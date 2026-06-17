@@ -244,6 +244,11 @@ export const securityHeaders = (req: Request, res: Response, next: NextFunction)
  * Проверка HTTPS в production
  */
 export const enforceHttps = (req: Request, res: Response, next: NextFunction) => {
+  // Allow health checks over HTTP
+  if (req.path === '/health') {
+    return next();
+  }
+
   if (process.env.NODE_ENV === 'production' && !req.secure && req.get('x-forwarded-proto') !== 'https') {
     return res.redirect(301, `https://${req.get('host')}${req.url}`);
   }

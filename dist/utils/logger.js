@@ -5,9 +5,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.httpLogger = void 0;
 const winston_1 = __importDefault(require("winston"));
-const path_1 = __importDefault(require("path"));
 /**
  * Конфигурация логгера с Winston
+ * На Render используем только console, файловые логи отключены
  */
 // Определяем уровни логирования
 const levels = {
@@ -31,13 +31,12 @@ const format = winston_1.default.format.combine(winston_1.default.format.timesta
 // Формат для консоли (более читаемый)
 const consoleFormat = winston_1.default.format.combine(winston_1.default.format.colorize({ all: true }), winston_1.default.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }), winston_1.default.format.printf(info => `${info.timestamp} [${info.level}]: ${info.message}${info.stack ? '\n' + info.stack : ''}`));
 // Определяем транспорты (куда писать логи)
+// На Render и в production используем ТОЛЬКО console логи (нет доступа к файловой системе)
 const transports = [
-    // Консоль
     new winston_1.default.transports.Console({
         format: consoleFormat,
     }),
 ];
-// Файловые транспорты отключены в production (используем только console логи)
 // Создаем logger
 const logger = winston_1.default.createLogger({
     level: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'development' ? 'debug' : 'info'),

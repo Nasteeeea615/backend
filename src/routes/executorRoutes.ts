@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import executorController from '../controllers/executorController';
-import { authenticate, authorize } from '../middleware/authMiddleware';
+import { authenticate, authorize, requireVerifiedExecutor } from '../middleware/authMiddleware';
 
 const router = Router();
 
 // All routes require authentication and executor role
 router.use(authenticate);
 router.use(authorize('executor'));
+router.use(requireVerifiedExecutor);
 
 // POST /api/executor/start-work - Start working
 router.post('/start-work', executorController.startWork);

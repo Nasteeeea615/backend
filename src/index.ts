@@ -41,6 +41,12 @@ if (process.env.NODE_ENV !== 'production') {
 validateEnvironment();
 
 const app: Application = express();
+
+// Trust the first proxy (Render/!load balancer) so X-Forwarded-* headers are
+// honored. Required for express-rate-limit to identify clients correctly and
+// for HTTPS enforcement behind the proxy.
+app.set('trust proxy', 1);
+
 const httpServer = createServer(app);
 const io = new SocketIOServer(httpServer, {
   cors: {
@@ -210,6 +216,8 @@ const startServer = async () => {
 
     // Start periodic sweep for expired SBP payments.
     paymentService.startSbpTimeoutScheduler();
+    // Start YooKassa payment status poller (fallback when webhook not configured).
+    paymentService.startYooKassaPolling();
 
     const activePort = await listenWithFallback(BASE_PORT);
     console.log(`🚀 Server is running on port ${activePort}`);

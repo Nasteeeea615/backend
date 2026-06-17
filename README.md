@@ -7,8 +7,8 @@ Backend API для приложения заказа услуг по откач�
 ```
 backend/
 ├── src/
-│   ├── routes/         # API маршруты
-│   ├── controllers/    # Контроллеры
+DB_SSL=false
+REDIS_URL=redis://localhost:6379
 │   ├── services/       # Бизнес-логика
 │   ├── models/         # Модели данных
 │   ├── middleware/     # Middleware функции
@@ -18,6 +18,9 @@ backend/
 │   └── index.ts        # Точка входа
 ├── dist/               # Скомпилированный код
 └── package.json
+YOOKASSA_SHOP_ID=516027
+YOOKASSA_SECRET_KEY=test_your_secret_key
+YOOKASSA_TEST_MODE=true
 ```
 
 ## Установка

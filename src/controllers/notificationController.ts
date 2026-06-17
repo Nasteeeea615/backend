@@ -111,3 +111,31 @@ export const markAllNotificationsAsRead = async (req: AuthRequest, res: Response
     return res.status(500).json({ error: 'Failed to mark all notifications as read' });
   }
 };
+
+export const testPush = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const { title, body, type } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (!title || !body) {
+      return res.status(400).json({ error: 'Title and body are required' });
+    }
+
+    await notificationService.sendPushNotification({
+      userId,
+      type: type || 'test',
+      title,
+      body,
+      data: { origin: 'dev_test' },
+    });
+
+    return res.json({ success: true, message: 'Test push triggered' });
+  } catch (error) {
+    console.error('Error in testPush:', error);
+    return res.status(500).json({ error: 'Failed to send test push' });
+  }
+};

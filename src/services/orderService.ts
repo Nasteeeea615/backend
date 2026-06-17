@@ -149,6 +149,18 @@ class OrderService {
   }
 
   /**
+   * Check if order is assigned to executor
+   */
+  async isOrderAssignedToExecutor(orderId: string, executorId: string): Promise<boolean> {
+    const result = await pool.query(
+      'SELECT id FROM orders WHERE id = $1 AND executor_id = $2',
+      [orderId, executorId]
+    );
+
+    return result.rows.length > 0;
+  }
+
+  /**
    * Notify available executors about new order
    */
   async notifyAvailableExecutors(orderId: string, vehicleCapacity: 3 | 5 | 10): Promise<void> {

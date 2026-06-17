@@ -84,7 +84,8 @@ class ExecutorService {
       }
 
       const currentBalance = Number(balanceCheck.rows[0].balance || 0);
-      if (currentBalance <= 0) {
+      const isTestMode = process.env.NODE_ENV !== 'production' || process.env.YOOKASSA_TEST_MODE === 'true';
+      if (currentBalance <= 0 && !isTestMode) {
         throw new AppError(
           'INSUFFICIENT_BALANCE',
           'Невозможно принять заказ. Баланс равен 0',

@@ -211,40 +211,89 @@ class AdminController {
     const limitNum = parseInt(limit as string);
     const offset = (pageNum - 1) * limitNum;
 
-    let query = 'SELECT * FROM users WHERE 1=1';
+    // Join with profiles so admin sees verification status and profile details
+    let query = `
+      SELECT
+        u.*,
+        cp.city, cp.street, cp.house_number,
+        ep.vehicle_number, ep.vehicle_capacity, ep.is_verified,
+        ep.is_working, ep.rating, ep.completed_orders_count, ep.balance as executor_balance,
+        CASE WHEN u.email IS NOT NULL THEN true ELSE false END AS email_confirmed
+      FROM users u
+      LEFT JOIN client_profiles cp ON cp.user_id = u.id
+      LEFT JOIN executor_profiles ep ON ep.user_id = u.id
+      WHERE 1=1
+    `;
     const params: any[] = [];
     let paramIndex = 1;
 
     if (role) {
-      query += ` AND role = $${paramIndex}`;
+      query += ` AND u.role = $${paramIndex}`;
       params.push(role);
       paramIndex++;
     }
 
     if (isBlocked !== undefined) {
-      query += ` AND is_blocked = $${paramIndex}`;
+      query += ` AND u.is_blocked = $${paramIndex}`;
       params.push(isBlocked === 'true');
       paramIndex++;
     }
 
-    query += ` ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+    query += ` ORDER BY u.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
     params.push(limitNum, offset);
 
     const result = await pool.query(query, params);
 
+    // Map rows: attach profile fields as nested objects for frontend compatibility
+    const users = result.rows.map((row: any) => {
+      const user: any = {
+        id: row.id,
+        phone_number: row.phone_number,
+        name: row.name,
+        email: row.email,
+        role: row.role,
+        is_blocked: row.is_blocked,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        email_confirmed: row.email_confirmed,
+      };
+
+      if (row.role === 'client' && row.city) {
+        user.client_profile = {
+          city: row.city,
+          street: row.street,
+          house_number: row.house_number,
+        };
+      }
+
+      if (row.role === 'executor' && row.vehicle_number) {
+        user.executor_profile = {
+          vehicle_number: row.vehicle_number,
+          vehicle_capacity: row.vehicle_capacity,
+          is_verified: row.is_verified,
+          is_working: row.is_working,
+          rating: row.rating,
+          completed_orders_count: row.completed_orders_count,
+          balance: row.executor_balance,
+        };
+      }
+
+      return user;
+    });
+
     // Get total count
-    let countQuery = 'SELECT COUNT(*) FROM users WHERE 1=1';
+    let countQuery = 'SELECT COUNT(*) FROM users u WHERE 1=1';
     const countParams: any[] = [];
     let countParamIndex = 1;
 
     if (role) {
-      countQuery += ` AND role = $${countParamIndex}`;
+      countQuery += ` AND u.role = $${countParamIndex}`;
       countParams.push(role);
       countParamIndex++;
     }
 
     if (isBlocked !== undefined) {
-      countQuery += ` AND is_blocked = $${countParamIndex}`;
+      countQuery += ` AND u.is_blocked = $${countParamIndex}`;
       countParams.push(isBlocked === 'true');
     }
 
@@ -254,7 +303,7 @@ class AdminController {
     const response: APIResponse = {
       success: true,
       data: {
-        users: result.rows,
+        users,
         pagination: {
           page: pageNum,
           limit: limitNum,
@@ -665,6 +714,45 @@ class AdminController {
         },
         newRegistrations: newUsersResult.rows,
       },
+    };
+
+    res.json(response);
+  });
+  /**
+   * POST /api/admin/users/:id/balance
+   * Top up executor balance (admin only, for testing)
+   */
+  topUpExecutorBalance = asyncHandler(async (req: AuthRequest, res: Response) => {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : (req.params.id || '');
+    const { amount } = req.body;
+
+    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+      throw new AppError('INVALID_AMOUNT', 'Укажите корректную сумму пополнения', 400);
+    }
+
+    const num = Number(amount);
+
+    // Verify user is executor
+    const userResult = await pool.query(
+      'SELECT role FROM users WHERE id = $1',
+      [id]
+    );
+    if (userResult.rows.length === 0) throw new AppError('USER_NOT_FOUND', 'Пользователь не найден', 404);
+    if (userResult.rows[0].role !== 'executor') throw new AppError('INVALID_ROLE', 'Пользователь не является исполнителем', 400);
+
+    await pool.query(
+      `UPDATE executor_profiles SET balance = balance + $1 WHERE user_id = $2`,
+      [num, id]
+    );
+
+    const profile = await pool.query(
+      'SELECT balance FROM executor_profiles WHERE user_id = $1',
+      [id]
+    );
+
+    const response: APIResponse = {
+      success: true,
+      data: { balance: profile.rows[0]?.balance, message: `Баланс пополнен на ${num} ₽` },
     };
 
     res.json(response);

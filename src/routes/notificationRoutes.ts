@@ -5,6 +5,7 @@ import {
   getNotifications,
   markNotificationAsRead,
   markAllNotificationsAsRead,
+  testPush,
 } from '../controllers/notificationController';
 import { authenticate } from '../middleware/authMiddleware';
 
@@ -18,6 +19,9 @@ router.post('/fcm-token', saveFCMToken);
 
 // Remove FCM token
 router.delete('/fcm-token', removeFCMToken);
+
+// Test push (dev only)
+router.post('/test', testPush);
 
 // Get user notifications
 router.get('/', getNotifications);

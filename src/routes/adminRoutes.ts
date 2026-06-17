@@ -18,6 +18,7 @@ router.get('/users', adminController.getAllUsers);
 router.get('/users/:id', adminController.getUserDetails);
 router.put('/users/:id/block', adminController.toggleBlockUser);
 router.put('/users/:id/verify', adminController.verifyExecutor);
+router.post('/users/:id/balance', adminController.topUpExecutorBalance);
 
 // Payments management
 router.get('/payments', adminController.getAllPayments);

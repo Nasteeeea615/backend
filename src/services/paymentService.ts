@@ -10,7 +10,9 @@ import logger from '../utils/logger';
 
 class PaymentService {
   private timeoutJobStarted = false;
+  private pollingJobStarted = false;
   private readonly sbpTimeoutMinutes = Number(process.env.SBP_PAYMENT_TIMEOUT_MINUTES || 15);
+  private readonly pollingIntervalMs = Number(process.env.YOOKASSA_POLL_INTERVAL_MS || 30_000);
 
   /**
    * Start background job that expires stale SBP payments.
@@ -80,6 +82,57 @@ class PaymentService {
   }
 
   /**
+   * Start background poller that syncs pending YooKassa payment statuses.
+   * Used as a fallback when webhooks are not configured / not reachable.
+   */
+  startYooKassaPolling(): void {
+    if (this.pollingJobStarted) return;
+    this.pollingJobStarted = true;
+
+    const poll = async () => {
+      try {
+        // Find pending payments that have a yookassa_payment_id
+        const result = await pool.query(
+          `SELECT id, yookassa_payment_id
+           FROM payments
+           WHERE status = 'pending'
+             AND yookassa_payment_id IS NOT NULL
+           ORDER BY created_at ASC
+           LIMIT 50`
+        );
+
+        for (const row of result.rows) {
+          try {
+            const yk = await yookassaService.getPaymentStatus(row.yookassa_payment_id);
+            if (yk.status === 'succeeded') {
+              logger.info('Poller: payment succeeded', { paymentId: row.id, ykId: row.yookassa_payment_id });
+              await this.handlePaymentSuccess(yk);
+            } else if (yk.status === 'canceled') {
+              logger.info('Poller: payment canceled', { paymentId: row.id, ykId: row.yookassa_payment_id });
+              await this.handlePaymentFailed(yk);
+            }
+          } catch (inner: any) {
+            logger.warn('Poller: failed to check payment', {
+              paymentId: row.id,
+              error: inner?.message,
+            });
+          }
+        }
+      } catch (error: any) {
+        logger.error('YooKassa poller sweep failed', { error: error?.message });
+      }
+    };
+
+    // First run after 10 seconds, then every pollingIntervalMs
+    setTimeout(() => {
+      poll();
+      setInterval(poll, this.pollingIntervalMs);
+    }, 10_000);
+
+    logger.info('YooKassa payment poller started', { intervalMs: this.pollingIntervalMs });
+  }
+
+  /**
    * Create payment for order
    */
   async createPayment(orderId: string, clientId: string, paymentMethod: any): Promise<any> {
@@ -97,9 +150,10 @@ class PaymentService {
       throw new AppError('FORBIDDEN', 'This order does not belong to you', 403);
     }
 
-    // Check if order is completed
-    if (order.status !== 'completed') {
-      throw new AppError('ORDER_NOT_COMPLETED', 'Order must be completed before payment', 400);
+    // Allow payment when order is active or completed (SBP is paid before executor marks complete)
+    const payableStatuses = ['in_progress', 'awaiting_payment', 'completed'];
+    if (!payableStatuses.includes(order.status)) {
+      throw new AppError('ORDER_NOT_READY', 'Заказ ещё не принят исполнителем', 400);
     }
 
     // Check if payment already exists

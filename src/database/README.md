@@ -68,11 +68,12 @@ npm run db:refresh
 1. **users** - пользователи системы
 2. **client_profiles** - профили клиентов
 3. **executor_profiles** - профили исполнителей
-4. **orders** - заказы
-5. **payments** - платежи
-6. **tickets** - тикеты поддержки
-7. **messages** - сообщения в тикетах
-8. **notifications** - уведомления
+4. **login_verification_codes** - коды входа по email
+5. **orders** - заказы
+6. **payments** - платежи
+7. **tickets** - тикеты поддержки
+8. **messages** - сообщения в тикетах
+9. **notifications** - уведомления
 
 ### Тестовые данные
 

@@ -24,8 +24,21 @@ class UserService {
    */
   async findByEmail(email: string): Promise<User | null> {
     const result = await pool.query(
-      'SELECT * FROM users WHERE email = $1',
+      'SELECT * FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1))',
       [email]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return result.rows[0];
+  }
+
+  async findByEmailAndRole(email: string, role: string): Promise<User | null> {
+    const result = await pool.query(
+      'SELECT * FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) AND role = $2',
+      [email, role]
     );
 
     if (result.rows.length === 0) {

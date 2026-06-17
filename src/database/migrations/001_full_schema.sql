@@ -60,13 +60,13 @@ CREATE TRIGGER update_users_updated_at
   EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TABLE IF NOT EXISTS login_verification_codes (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id SERIAL PRIMARY KEY,
   email VARCHAR(255) NOT NULL,
-  role VARCHAR(20),
-  code_hash TEXT NOT NULL,
-  attempts INTEGER NOT NULL DEFAULT 0,
-  is_used BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  role VARCHAR(50),
+  code_hash VARCHAR(255) NOT NULL,
+  attempts INTEGER DEFAULT 0,
+  is_used BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT NOW(),
   expires_at TIMESTAMP NOT NULL,
   verified_at TIMESTAMP
 );
