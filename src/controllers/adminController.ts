@@ -218,6 +218,7 @@ class AdminController {
         cp.city, cp.street, cp.house_number,
         ep.vehicle_number, ep.vehicle_capacity, ep.is_verified,
         ep.is_working, ep.rating, ep.completed_orders_count, ep.balance as executor_balance,
+        ep.documents,
         CASE WHEN u.email IS NOT NULL THEN true ELSE false END AS email_confirmed
       FROM users u
       LEFT JOIN client_profiles cp ON cp.user_id = u.id
@@ -275,6 +276,7 @@ class AdminController {
           rating: row.rating,
           completed_orders_count: row.completed_orders_count,
           balance: row.executor_balance,
+          documents: row.documents || {},
         };
       }
 

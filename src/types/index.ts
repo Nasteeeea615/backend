@@ -159,6 +159,12 @@ export interface RegisterClientDTO {
   agreed_to_terms: boolean;
 }
 
+export interface ExecutorDocuments {
+  passport_photo?: string;
+  driver_license_photo?: string;
+  vehicle_registration_photo?: string;
+}
+
 export interface RegisterExecutorDTO {
   email: string;
   phone_number: string;
@@ -166,6 +172,7 @@ export interface RegisterExecutorDTO {
   vehicle_number: string;
   vehicle_capacity: 3 | 5 | 10;
   agreed_to_terms: boolean;
+  documents?: ExecutorDocuments;
 }
 
 export interface RequestLoginCodeDTO {

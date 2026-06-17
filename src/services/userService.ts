@@ -109,9 +109,9 @@ class UserService {
 
   async addExecutorProfile(userId: string, data: RegisterExecutorDTO): Promise<void> {
     await pool.query(
-      `INSERT INTO executor_profiles (user_id, vehicle_number, vehicle_capacity, is_verified)
-       VALUES ($1, $2, $3, false)`,
-      [userId, data.vehicle_number, data.vehicle_capacity]
+      `INSERT INTO executor_profiles (user_id, vehicle_number, vehicle_capacity, is_verified, documents)
+       VALUES ($1, $2, $3, false, $4)`,
+      [userId, data.vehicle_number, data.vehicle_capacity, JSON.stringify(data.documents || {})]
     );
   }
 
@@ -178,9 +178,9 @@ class UserService {
 
       // Create executor profile (not verified by default)
       await client.query(
-        `INSERT INTO executor_profiles (user_id, vehicle_number, vehicle_capacity, is_verified) 
-         VALUES ($1, $2, $3, false)`,
-        [user.id, data.vehicle_number, data.vehicle_capacity]
+        `INSERT INTO executor_profiles (user_id, vehicle_number, vehicle_capacity, is_verified, documents)
+         VALUES ($1, $2, $3, false, $4)`,
+        [user.id, data.vehicle_number, data.vehicle_capacity, JSON.stringify(data.documents || {})]
       );
 
       await client.query('COMMIT');
