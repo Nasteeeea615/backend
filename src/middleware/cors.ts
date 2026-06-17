@@ -45,14 +45,27 @@ const getAllowedOrigins = (): string[] => {
 const corsOptions: cors.CorsOptions = {
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
         const allowed = getAllowedOrigins();
-        
+        // Extra origins from env (comma-separated), e.g. the deployed admin URL.
+        const envOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+
         // Разрешить запросы без origin (например, mobile apps, Postman)
         if (!origin) {
             return callback(null, true);
         }
-        
+
+        // Allow any Render-hosted frontend (admin/static sites live on *.onrender.com).
+        let isOnrender = false;
+        try {
+            isOnrender = new URL(origin).hostname.endsWith('.onrender.com');
+        } catch {
+            isOnrender = false;
+        }
+
         // Проверка origin в whitelist
-        if (allowed.includes(origin)) {
+        if (allowed.includes(origin) || envOrigins.includes(origin) || isOnrender) {
             callback(null, true);
         } else {
             console.warn(`[CORS] Blocked request from origin: ${origin}`);
