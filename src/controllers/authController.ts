@@ -94,12 +94,13 @@ class AuthController {
       throw new AppError('INVALID_TOKEN', 'Invalid or expired verification code', 401);
     }
 
-    // Create the account now that the email is proven.
+    // Create the account now that the email is proven. data.role is guaranteed
+    // truthy here because pending is only looked up when data.role is set.
     if (!user && pending) {
-      user = pending.role === 'executor'
+      user = data.role === 'executor'
         ? await this.createOrAttachExecutor(pending as RegisterExecutorDTO)
         : await this.createOrAttachClient(pending as RegisterClientDTO);
-      await pendingRegistrationService.delete(email, pending.role);
+      await pendingRegistrationService.delete(email, data.role!);
     }
 
     if (!user) {
