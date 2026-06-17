@@ -4,12 +4,14 @@ import jwtService from '../services/jwtService';
 import userService from '../services/userService';
 import emailService from '../services/emailService';
 import loginCodeService from '../services/loginCodeService';
+import pendingRegistrationService from '../services/pendingRegistrationService';
 import {
   RegisterClientDTO,
   RegisterExecutorDTO,
   RequestLoginCodeDTO,
   VerifyLoginCodeDTO,
   APIResponse,
+  User,
 } from '../types';
 
 class AuthController {
@@ -20,27 +22,21 @@ class AuthController {
    */
   requestCode = asyncHandler(async (req: Request, res: Response) => {
     const data: RequestLoginCodeDTO = req.body;
-    console.log('📧 [requestCode] START', { email: data.email });
 
     if (!data.email) {
       throw new AppError('MISSING_REQUIRED_FIELD', 'Email is required', 400);
     }
 
     const email = data.email.trim().toLowerCase();
-    console.log('📧 [requestCode] EMAIL NORMALIZED', { email });
 
     const code = loginCodeService.generateCode();
-    console.log('📧 [requestCode] CODE GENERATED', { code });
-
     await loginCodeService.storeCode(email, code, data.role);
-    console.log('📧 [requestCode] CODE STORED');
 
     const delivery = await emailService.sendLoginCode(email, code, data.role);
-    console.log('📧 [requestCode] EMAIL SENT', { sent: delivery.sent, hasDebugCode: !!delivery.debugCode });
 
-    // Never expose the code in the API response in production. Even if SMTP
-    // fails, leaking the login code over the API would let anyone log in as
-    // any user. debugCode is only returned outside of production for local dev.
+    // Never expose the code in the API response in production. Even if email
+    // delivery fails, leaking the login code over the API would let anyone log
+    // in as any user. debugCode is only returned outside of production.
     const isProduction = process.env.NODE_ENV === 'production';
 
     const response: APIResponse = {
@@ -60,7 +56,8 @@ class AuthController {
 
   /**
    * POST /api/auth/verify-code
-   * Verify email confirmation code and create access cookie
+   * Verify email confirmation code, creating the user from a pending
+   * registration if this is a first-time sign-up.
    */
   verifyCode = asyncHandler(async (req: Request, res: Response) => {
     const data: VerifyLoginCodeDTO = req.body;
@@ -70,22 +67,43 @@ class AuthController {
     }
 
     const email = data.email.trim().toLowerCase();
-    // If role is specified, find user with that specific role
-    const user = data.role
+
+    // Existing (already verified) user?
+    let user = data.role
       ? await userService.findByEmailAndRole(email, data.role)
       : await userService.findByEmail(email);
 
-    if (!user) {
+    // First-time sign-up: data was parked in pending_registrations and the user
+    // row does not exist yet.
+    let pending: Record<string, any> | null = null;
+    if (!user && data.role) {
+      pending = await pendingRegistrationService.get(email, data.role);
+    }
+
+    if (!user && !pending) {
       throw new AppError('USER_NOT_FOUND', 'User with this email was not found', 404);
     }
 
-    if (data.role && user.role !== data.role) {
+    if (user && data.role && user.role !== data.role) {
       throw new AppError('FORBIDDEN', 'This account does not have the required role', 403);
     }
 
-    const verified = await loginCodeService.verifyCode(email, data.code.trim(), data.role || user.role);
+    const roleForCode = data.role || user?.role;
+    const verified = await loginCodeService.verifyCode(email, data.code.trim(), roleForCode);
     if (!verified) {
       throw new AppError('INVALID_TOKEN', 'Invalid or expired verification code', 401);
+    }
+
+    // Create the account now that the email is proven.
+    if (!user && pending) {
+      user = pending.role === 'executor'
+        ? await this.createOrAttachExecutor(pending as RegisterExecutorDTO)
+        : await this.createOrAttachClient(pending as RegisterClientDTO);
+      await pendingRegistrationService.delete(email, pending.role);
+    }
+
+    if (!user) {
+      throw new AppError('SERVER_ERROR', 'Failed to create user', 500);
     }
 
     const token = jwtService.generateToken({ userId: user.id, role: user.role });
@@ -134,19 +152,23 @@ class AuthController {
 
   /**
    * POST /api/auth/register-client
-   * Register new client
+   * Validate client registration and park it until the email code is verified.
+   * The users row is created later in verifyCode.
    */
   registerClient = asyncHandler(async (req: Request, res: Response) => {
     const data: RegisterClientDTO = req.body;
-    const normalizedEmail = data.email?.trim().toLowerCase();
-    const normalizedPhone = data.phone_number?.trim();
-    const normalizedName = data.name?.trim();
-    const normalizedCity = data.city?.trim();
-    const normalizedStreet = data.street?.trim();
-    const normalizedHouseNumber = data.house_number?.trim();
+    const normalized = {
+      ...data,
+      email: data.email?.trim().toLowerCase(),
+      phone_number: data.phone_number?.trim(),
+      name: data.name?.trim(),
+      city: data.city?.trim(),
+      street: data.street?.trim(),
+      house_number: data.house_number?.trim(),
+    };
 
-    // Validate required fields
-    if (!normalizedEmail || !normalizedPhone || !normalizedName || !normalizedCity || !normalizedStreet || !normalizedHouseNumber) {
+    if (!normalized.email || !normalized.phone_number || !normalized.name ||
+        !normalized.city || !normalized.street || !normalized.house_number) {
       throw new AppError('MISSING_REQUIRED_FIELD', 'All fields are required', 400);
     }
 
@@ -154,109 +176,16 @@ class AuthController {
       throw new AppError('TERMS_NOT_AGREED', 'You must agree to terms and conditions', 400);
     }
 
-    const existingByEmail = await userService.findByEmail(normalizedEmail);
+    await this.assertPhoneAvailableForRole(normalized.email, normalized.phone_number, 'client');
 
-    // Check if user already exists
-    const existingUser = await userService.findByPhoneNumber(normalizedPhone);
-
-    if (existingByEmail) {
-      const hasClientProfile = await userService.hasClientProfile(existingByEmail.id);
-
-      if (hasClientProfile) {
-        const response: APIResponse = {
-          success: true,
-          data: {
-            user: await userService.getUserWithProfile(existingByEmail.id),
-            requiresVerification: true,
-            role: 'client',
-            message: 'Account already exists. Continue to verification.',
-          },
-        };
-
-        res.status(200).json(response);
-        return;
-      }
-
-      if (existingUser && existingUser.id !== existingByEmail.id) {
-        throw new AppError('PHONE_ALREADY_EXISTS', 'User with this phone number already exists', 400);
-      }
-
-      if (!existingUser || existingUser.id === existingByEmail.id) {
-        await userService.addClientProfile(existingByEmail.id, {
-          ...data,
-          email: normalizedEmail,
-          phone_number: normalizedPhone,
-          name: normalizedName,
-          city: normalizedCity,
-          street: normalizedStreet,
-          house_number: normalizedHouseNumber,
-        });
-        await userService.updateEmail(existingByEmail.id, normalizedEmail);
-        await userService.updateRole(existingByEmail.id, 'client');
-
-        const response: APIResponse = {
-          success: true,
-          data: {
-            user: await userService.getUserWithProfile(existingByEmail.id),
-            requiresVerification: true,
-            role: 'client',
-          },
-        };
-
-        res.status(201).json(response);
-        return;
-      }
-    }
-
-    let user;
-
-    if (existingUser) {
-      const hasClientProfile = await userService.hasClientProfile(existingUser.id);
-      if (hasClientProfile) {
-        throw new AppError('USER_ALREADY_EXISTS', 'User with this phone number already exists', 400);
-      }
-
-      await userService.addClientProfile(existingUser.id, {
-        ...data,
-        email: normalizedEmail,
-        phone_number: normalizedPhone,
-        name: normalizedName,
-        city: normalizedCity,
-        street: normalizedStreet,
-        house_number: normalizedHouseNumber,
-      });
-      await userService.updateEmail(existingUser.id, normalizedEmail);
-      await userService.updateRole(existingUser.id, 'client');
-
-      user = await userService.findById(existingUser.id);
-    } else {
-      // Register new client
-      user = await userService.registerClient({
-        ...data,
-        email: normalizedEmail,
-        phone_number: normalizedPhone,
-        name: normalizedName,
-        city: normalizedCity,
-        street: normalizedStreet,
-        house_number: normalizedHouseNumber,
-      });
-    }
-
-    if (!user) {
-      throw new AppError('SERVER_ERROR', 'Failed to create user', 500);
-    }
-
-    // Defensive fix for legacy/dirty data states where email may still be null after registration.
-    if (!user.email) {
-      await userService.updateEmail(user.id, normalizedEmail);
-    }
+    await pendingRegistrationService.save(normalized.email, 'client', normalized);
 
     const response: APIResponse = {
       success: true,
       data: {
-        user: await userService.getUserWithProfile(user.id),
         requiresVerification: true,
         role: 'client',
+        message: 'Continue to verification.',
       },
     };
 
@@ -265,17 +194,20 @@ class AuthController {
 
   /**
    * POST /api/auth/register-executor
-   * Register new executor
+   * Validate executor registration and park it until the email code is verified.
    */
   registerExecutor = asyncHandler(async (req: Request, res: Response) => {
     const data: RegisterExecutorDTO = req.body;
-    const normalizedEmail = data.email?.trim().toLowerCase();
-    const normalizedPhone = data.phone_number?.trim();
-    const normalizedName = data.name?.trim();
-    const normalizedVehicleNumber = data.vehicle_number?.trim();
+    const normalized = {
+      ...data,
+      email: data.email?.trim().toLowerCase(),
+      phone_number: data.phone_number?.trim(),
+      name: data.name?.trim(),
+      vehicle_number: data.vehicle_number?.trim(),
+    };
 
-    // Validate required fields
-    if (!normalizedEmail || !normalizedPhone || !normalizedName || !normalizedVehicleNumber || !data.vehicle_capacity) {
+    if (!normalized.email || !normalized.phone_number || !normalized.name ||
+        !normalized.vehicle_number || !data.vehicle_capacity) {
       throw new AppError('MISSING_REQUIRED_FIELD', 'All fields are required', 400);
     }
 
@@ -283,113 +215,21 @@ class AuthController {
       throw new AppError('TERMS_NOT_AGREED', 'You must agree to terms and conditions', 400);
     }
 
-    // Validate vehicle capacity
     if (![3, 5, 10].includes(data.vehicle_capacity)) {
       throw new AppError('INVALID_VEHICLE_CAPACITY', 'Vehicle capacity must be 3, 5, or 10', 400);
     }
 
-    const existingByEmail = await userService.findByEmail(normalizedEmail);
+    await this.assertPhoneAvailableForRole(normalized.email, normalized.phone_number, 'executor');
 
-    // Check if user already exists
-    const existingUser = await userService.findByPhoneNumber(normalizedPhone);
-
-    if (existingByEmail) {
-      const hasExecutorProfile = await userService.hasExecutorProfile(existingByEmail.id);
-
-      if (hasExecutorProfile) {
-        const response: APIResponse = {
-          success: true,
-          data: {
-            user: await userService.getUserWithProfile(existingByEmail.id),
-            message: 'Account already exists. Continue to verification.',
-            requiresVerification: true,
-            requiresAdminApproval: !existingByEmail.is_blocked,
-            role: 'executor',
-          },
-        };
-
-        res.status(200).json(response);
-        return;
-      }
-
-      if (existingUser && existingUser.id !== existingByEmail.id) {
-        throw new AppError('PHONE_ALREADY_EXISTS', 'User with this phone number already exists', 400);
-      }
-
-      if (!existingUser || existingUser.id === existingByEmail.id) {
-        await userService.addExecutorProfile(existingByEmail.id, {
-          ...data,
-          email: normalizedEmail,
-          phone_number: normalizedPhone,
-          name: normalizedName,
-          vehicle_number: normalizedVehicleNumber,
-        });
-        await userService.updateEmail(existingByEmail.id, normalizedEmail);
-        await userService.updateRole(existingByEmail.id, 'executor');
-
-        const response: APIResponse = {
-          success: true,
-          data: {
-            user: await userService.getUserWithProfile(existingByEmail.id),
-            message: 'Registration successful. Your account is pending verification.',
-            requiresVerification: true,
-            requiresAdminApproval: true,
-            role: 'executor',
-          },
-        };
-
-        res.status(201).json(response);
-        return;
-      }
-    }
-
-    let user;
-
-    if (existingUser) {
-      const hasExecutorProfile = await userService.hasExecutorProfile(existingUser.id);
-      if (hasExecutorProfile) {
-        throw new AppError('USER_ALREADY_EXISTS', 'User with this phone number already exists', 400);
-      }
-
-      await userService.addExecutorProfile(existingUser.id, {
-        ...data,
-        email: normalizedEmail,
-        phone_number: normalizedPhone,
-        name: normalizedName,
-        vehicle_number: normalizedVehicleNumber,
-      });
-      await userService.updateEmail(existingUser.id, normalizedEmail);
-      await userService.updateRole(existingUser.id, 'executor');
-
-      user = await userService.findById(existingUser.id);
-    } else {
-      // Register new executor
-      user = await userService.registerExecutor({
-        ...data,
-        email: normalizedEmail,
-        phone_number: normalizedPhone,
-        name: normalizedName,
-        vehicle_number: normalizedVehicleNumber,
-      });
-    }
-
-    if (!user) {
-      throw new AppError('SERVER_ERROR', 'Failed to create user', 500);
-    }
-
-    // Defensive fix for legacy/dirty data states where email may still be null after registration.
-    if (!user.email) {
-      await userService.updateEmail(user.id, normalizedEmail);
-    }
+    await pendingRegistrationService.save(normalized.email, 'executor', normalized);
 
     const response: APIResponse = {
       success: true,
       data: {
-        user: await userService.getUserWithProfile(user.id),
-        message: 'Registration successful. Your account is pending verification.',
         requiresVerification: true,
         requiresAdminApproval: true,
         role: 'executor',
+        message: 'Registration received. Your account is pending verification.',
       },
     };
 
@@ -398,10 +238,8 @@ class AuthController {
 
   /**
    * POST /api/auth/logout
-   * Logout user (client-side token removal)
    */
   logout = asyncHandler(async (_req: Request, res: Response) => {
-    // Clear the access_token cookie
     res.clearCookie('access_token', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -416,6 +254,124 @@ class AuthController {
 
     res.json(response);
   });
+
+  /**
+   * Reject registration early if the phone number already belongs to a
+   * different verified user with the same role (real duplicate).
+   */
+  private async assertPhoneAvailableForRole(
+    email: string,
+    phone: string,
+    role: 'client' | 'executor'
+  ): Promise<void> {
+    const existingByPhone = await userService.findByPhoneNumber(phone);
+    if (!existingByPhone) return;
+
+    const existingByEmail = await userService.findByEmail(email);
+    const samePerson = existingByEmail && existingByEmail.id === existingByPhone.id;
+    if (samePerson) return; // same account adding/confirming a profile
+
+    const hasProfile = role === 'client'
+      ? await userService.hasClientProfile(existingByPhone.id)
+      : await userService.hasExecutorProfile(existingByPhone.id);
+
+    if (hasProfile) {
+      throw new AppError('PHONE_ALREADY_EXISTS', 'User with this phone number already exists', 400);
+    }
+  }
+
+  /**
+   * Create a client user (or attach a client profile to an existing user for
+   * dual-role accounts). Mirrors the original registration logic, now run only
+   * after the email code is verified.
+   */
+  private async createOrAttachClient(data: RegisterClientDTO): Promise<User> {
+    const email = data.email!.trim().toLowerCase();
+    const phone = data.phone_number!.trim();
+
+    const existingByEmail = await userService.findByEmail(email);
+    const existingByPhone = await userService.findByPhoneNumber(phone);
+
+    if (existingByEmail) {
+      if (await userService.hasClientProfile(existingByEmail.id)) {
+        return existingByEmail;
+      }
+      if (existingByPhone && existingByPhone.id !== existingByEmail.id) {
+        throw new AppError('PHONE_ALREADY_EXISTS', 'User with this phone number already exists', 400);
+      }
+      await userService.addClientProfile(existingByEmail.id, data);
+      await userService.updateEmail(existingByEmail.id, email);
+      await userService.updateRole(existingByEmail.id, 'client');
+      return (await userService.findById(existingByEmail.id)) as User;
+    }
+
+    let user: User | null;
+    if (existingByPhone) {
+      if (await userService.hasClientProfile(existingByPhone.id)) {
+        throw new AppError('USER_ALREADY_EXISTS', 'User with this phone number already exists', 400);
+      }
+      await userService.addClientProfile(existingByPhone.id, data);
+      await userService.updateEmail(existingByPhone.id, email);
+      await userService.updateRole(existingByPhone.id, 'client');
+      user = await userService.findById(existingByPhone.id);
+    } else {
+      user = await userService.registerClient(data);
+    }
+
+    if (!user) {
+      throw new AppError('SERVER_ERROR', 'Failed to create user', 500);
+    }
+    if (!user.email) {
+      await userService.updateEmail(user.id, email);
+    }
+    return user;
+  }
+
+  /**
+   * Create an executor user (or attach an executor profile to an existing
+   * user). Run only after the email code is verified.
+   */
+  private async createOrAttachExecutor(data: RegisterExecutorDTO): Promise<User> {
+    const email = data.email!.trim().toLowerCase();
+    const phone = data.phone_number!.trim();
+
+    const existingByEmail = await userService.findByEmail(email);
+    const existingByPhone = await userService.findByPhoneNumber(phone);
+
+    if (existingByEmail) {
+      if (await userService.hasExecutorProfile(existingByEmail.id)) {
+        return existingByEmail;
+      }
+      if (existingByPhone && existingByPhone.id !== existingByEmail.id) {
+        throw new AppError('PHONE_ALREADY_EXISTS', 'User with this phone number already exists', 400);
+      }
+      await userService.addExecutorProfile(existingByEmail.id, data);
+      await userService.updateEmail(existingByEmail.id, email);
+      await userService.updateRole(existingByEmail.id, 'executor');
+      return (await userService.findById(existingByEmail.id)) as User;
+    }
+
+    let user: User | null;
+    if (existingByPhone) {
+      if (await userService.hasExecutorProfile(existingByPhone.id)) {
+        throw new AppError('USER_ALREADY_EXISTS', 'User with this phone number already exists', 400);
+      }
+      await userService.addExecutorProfile(existingByPhone.id, data);
+      await userService.updateEmail(existingByPhone.id, email);
+      await userService.updateRole(existingByPhone.id, 'executor');
+      user = await userService.findById(existingByPhone.id);
+    } else {
+      user = await userService.registerExecutor(data);
+    }
+
+    if (!user) {
+      throw new AppError('SERVER_ERROR', 'Failed to create user', 500);
+    }
+    if (!user.email) {
+      await userService.updateEmail(user.id, email);
+    }
+    return user;
+  }
 }
 
 export default new AuthController();
