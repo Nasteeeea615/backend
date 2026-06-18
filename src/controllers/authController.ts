@@ -72,12 +72,12 @@ class AuthController {
     // profiles; the requested role selects which one to enter.
     let user = await userService.findByEmail(email);
 
-    // First-time sign-up: data was parked in pending_registrations and the user
-    // row does not exist yet.
-    let pending: Record<string, any> | null = null;
-    if (!user && data.role) {
-      pending = await pendingRegistrationService.get(email, data.role);
-    }
+    // A registration is parked in pending_registrations until the email code is
+    // confirmed. This covers both a brand-new account AND an existing user
+    // adding a second role (e.g. a client registering as executor).
+    const pending: Record<string, any> | null = data.role
+      ? await pendingRegistrationService.get(email, data.role)
+      : null;
 
     if (!user && !pending) {
       throw new AppError('USER_NOT_FOUND', 'User with this email was not found', 404);
@@ -89,15 +89,16 @@ class AuthController {
       throw new AppError('INVALID_TOKEN', 'Invalid or expired verification code', 401);
     }
 
-    // Create the account now that the email is proven. data.role is guaranteed
-    // truthy here because pending is only looked up when data.role is set.
-    if (!user && pending) {
+    // Create the account / attach the new role now that the email is proven.
+    // createOrAttach* handles both a new user and adding a profile to an
+    // existing one.
+    if (pending) {
       user = data.role === 'executor'
         ? await this.createOrAttachExecutor(pending as RegisterExecutorDTO)
         : await this.createOrAttachClient(pending as RegisterClientDTO);
       // Store the password chosen at registration so the user can later log in
       // with email+password instead of an email code.
-      if (user && pending.password) {
+      if (pending.password) {
         await userService.setPassword(user.id, pending.password);
       }
       await pendingRegistrationService.delete(email, data.role!);
