@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import authController from '../controllers/authController';
-import { authenticate } from '../middleware/authMiddleware';
 
 const router = Router();
 
@@ -12,9 +11,6 @@ router.post('/verify-code', authController.verifyCode);
 
 // POST /api/auth/login-password - Log in with email + password
 router.post('/login-password', authController.loginWithPassword);
-
-// POST /api/auth/switch-role - Switch active role (client <-> executor)
-router.post('/switch-role', authenticate, authController.switchRole);
 
 // GET /api/auth/me - Current authenticated user
 router.get('/me', authController.me);

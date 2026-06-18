@@ -156,15 +156,11 @@ class ProfileController {
     }
 
     try {
-      // Find another user record with same email but requested role
-      const currentUser = await pool.query('SELECT email FROM users WHERE id = $1', [req.user.id]);
-      const email = currentUser.rows[0]?.email;
-
-      const result = await pool.query(
-        'SELECT id FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) AND role = $2',
-        [email, role]
-      );
-      const isRegistered = result.rows.length > 0;
+      // One user row can hold both a client and an executor profile (email is
+      // unique). "Registered as <role>" means that profile exists for the user.
+      const isRegistered = role === 'client'
+        ? await userService.hasClientProfile(req.user.id)
+        : await userService.hasExecutorProfile(req.user.id);
 
       const response: APIResponse = {
         success: true,
@@ -197,16 +193,13 @@ class ProfileController {
       throw new AppError(ErrorCode.VALIDATION_ERROR, 'Invalid role', 400);
     }
 
-    // Find the other user record with same email but requested role
-    const currentUser = await pool.query('SELECT email FROM users WHERE id = $1', [req.user.id]);
-    const email = currentUser.rows[0]?.email;
+    // The same user holds both profiles; switching just flips the active role
+    // on that single row. Require that the target profile actually exists.
+    const hasProfile = newRole === 'client'
+      ? await userService.hasClientProfile(req.user.id)
+      : await userService.hasExecutorProfile(req.user.id);
 
-    const targetUserResult = await pool.query(
-      'SELECT id FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) AND role = $2',
-      [email, newRole]
-    );
-
-    if (targetUserResult.rows.length === 0) {
+    if (!hasProfile) {
       throw new AppError(
         ErrorCode.NOT_REGISTERED,
         `User is not registered as ${newRole}`,
@@ -214,13 +207,12 @@ class ProfileController {
       );
     }
 
-    const targetUserId = targetUserResult.rows[0].id;
+    await userService.updateRole(req.user.id, newRole);
 
-    // Get target user with profile
-    const user = await userService.getUserWithProfile(targetUserId);
+    const user = await userService.getUserWithProfile(req.user.id);
 
-    // Generate new JWT token for the target user
-    const token = jwtService.generateToken({ userId: targetUserId, role: newRole });
+    // Generate new JWT token carrying the new active role.
+    const token = jwtService.generateToken({ userId: req.user.id, role: newRole });
 
     const response: APIResponse = {
       success: true,

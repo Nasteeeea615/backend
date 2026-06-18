@@ -300,45 +300,6 @@ class AuthController {
     res.json(response);
   });
 
-  /**
-   * POST /api/auth/switch-role
-   * Switch the active role for a user that has both client and executor
-   * profiles. Returns a fresh token carrying the new role.
-   */
-  switchRole = asyncHandler(async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    if (!userId) {
-      throw new AppError('UNAUTHORIZED', 'Authentication required', 401);
-    }
-
-    const role = (req.body as { role?: string }).role;
-    if (role !== 'client' && role !== 'executor') {
-      throw new AppError('INVALID_ROLE', 'Role must be client or executor', 400);
-    }
-
-    const hasProfile = role === 'client'
-      ? await userService.hasClientProfile(userId)
-      : await userService.hasExecutorProfile(userId);
-
-    if (!hasProfile) {
-      throw new AppError('PROFILE_NOT_FOUND', `You don't have a ${role} profile yet`, 400);
-    }
-
-    await userService.updateRole(userId, role);
-
-    const token = jwtService.generateToken({ userId, role });
-    res.cookie('access_token', token, buildCookieOptions());
-
-    const response: APIResponse = {
-      success: true,
-      data: {
-        token,
-        user: await userService.getUserWithProfile(userId),
-      },
-    };
-
-    res.json(response);
-  });
 
   /**
    * Reject registration early if the phone number already belongs to a
