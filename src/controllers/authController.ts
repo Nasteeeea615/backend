@@ -68,10 +68,9 @@ class AuthController {
 
     const email = data.email.trim().toLowerCase();
 
-    // Existing (already verified) user?
-    let user = data.role
-      ? await userService.findByEmailAndRole(email, data.role)
-      : await userService.findByEmail(email);
+    // One row per email (unique). A user may hold both client and executor
+    // profiles; the requested role selects which one to enter.
+    let user = await userService.findByEmail(email);
 
     // First-time sign-up: data was parked in pending_registrations and the user
     // row does not exist yet.
@@ -82,10 +81,6 @@ class AuthController {
 
     if (!user && !pending) {
       throw new AppError('USER_NOT_FOUND', 'User with this email was not found', 404);
-    }
-
-    if (user && data.role && user.role !== data.role) {
-      throw new AppError('FORBIDDEN', 'This account does not have the required role', 403);
     }
 
     const roleForCode = data.role || user?.role;
@@ -112,7 +107,10 @@ class AuthController {
       throw new AppError('SERVER_ERROR', 'Failed to create user', 500);
     }
 
-    const token = jwtService.generateToken({ userId: user.id, role: user.role });
+    // Enter the requested role (must have that profile); make it the active role.
+    const activeRole = await this.resolveActiveRole(user, data.role);
+
+    const token = jwtService.generateToken({ userId: user.id, role: activeRole });
     res.cookie('access_token', token, buildCookieOptions());
 
     const response: APIResponse = {
@@ -273,9 +271,7 @@ class AuthController {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-    const user = role
-      ? await userService.findByEmailAndRole(normalizedEmail, role)
-      : await userService.findByEmail(normalizedEmail);
+    const user = await userService.findByEmail(normalizedEmail);
 
     if (!user) {
       throw new AppError('USER_NOT_FOUND', 'User with this email was not found', 404);
@@ -286,7 +282,10 @@ class AuthController {
       throw new AppError('INVALID_CREDENTIALS', 'Invalid email or password', 401);
     }
 
-    const token = jwtService.generateToken({ userId: user.id, role: user.role });
+    // Enter the requested role (must have that profile); make it active.
+    const activeRole = await this.resolveActiveRole(user, role);
+
+    const token = jwtService.generateToken({ userId: user.id, role: activeRole });
     res.cookie('access_token', token, buildCookieOptions());
 
     const response: APIResponse = {
@@ -299,6 +298,32 @@ class AuthController {
 
     res.json(response);
   });
+
+  /**
+   * Ensure the user can enter the requested role and make it their active role.
+   * With the single-user/dual-profile model, "logging in as executor" means the
+   * user must own an executor profile; we then flip the active role column.
+   */
+  private async resolveActiveRole(user: User, requestedRole?: string): Promise<string> {
+    if (!requestedRole || requestedRole === user.role) {
+      return user.role;
+    }
+    if (requestedRole !== 'client' && requestedRole !== 'executor') {
+      return user.role;
+    }
+
+    const hasProfile = requestedRole === 'client'
+      ? await userService.hasClientProfile(user.id)
+      : await userService.hasExecutorProfile(user.id);
+
+    if (!hasProfile) {
+      const roleName = requestedRole === 'client' ? 'заказчик' : 'исполнитель';
+      throw new AppError('NOT_REGISTERED', `Вы не зарегистрированы как ${roleName}`, 400);
+    }
+
+    await userService.updateRole(user.id, requestedRole);
+    return requestedRole;
+  }
 
 
   /**
