@@ -179,10 +179,11 @@ class AdminController {
       throw new AppError('EXECUTOR_NOT_VERIFIED', 'Executor is not verified', 400);
     }
 
-    // Update order
+    // Update order. Use 'in_progress' (same as a self-accepted order) so it
+    // shows up as the executor's active order instead of vanishing.
     const result = await pool.query(
-      `UPDATE orders 
-       SET executor_id = $1, status = 'assigned', accepted_at = NOW()
+      `UPDATE orders
+       SET executor_id = $1, status = 'in_progress', accepted_at = NOW()
        WHERE id = $2
        RETURNING *`,
       [executor_id, id]
