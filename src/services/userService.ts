@@ -1,3 +1,4 @@
+import bcrypt from 'bcrypt';
 import pool from '../config/database';
 import { User, RegisterClientDTO, RegisterExecutorDTO } from '../types';
 import { AppError } from '../middleware/errorHandler';
@@ -82,11 +83,31 @@ class UserService {
       [userId]
     );
 
+    // Never expose the password hash to clients.
+    const { password_hash, ...safeUser } = user as any;
+
     return {
-      ...user,
+      ...safeUser,
       clientProfile: clientProfileResult.rows[0] || null,
       executorProfile: executorProfileResult.rows[0] || null,
     };
+  }
+
+  /**
+   * Hash and store a login password for the user.
+   */
+  async setPassword(userId: string, plainPassword: string): Promise<void> {
+    const hash = await bcrypt.hash(plainPassword, 10);
+    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, userId]);
+  }
+
+  /**
+   * Verify a plaintext password against the stored hash.
+   */
+  async verifyPassword(user: User, plainPassword: string): Promise<boolean> {
+    const hash = (user as any).password_hash;
+    if (!hash) return false;
+    return bcrypt.compare(plainPassword, hash);
   }
 
   async hasClientProfile(userId: string): Promise<boolean> {

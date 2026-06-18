@@ -10,6 +10,7 @@ export interface User {
   is_blocked: boolean;
   created_at: Date;
   updated_at: Date;
+  password_hash?: string | null;
 }
 
 export interface ClientProfile {
@@ -157,6 +158,7 @@ export interface RegisterClientDTO {
   street: string;
   house_number: string;
   agreed_to_terms: boolean;
+  password?: string;
 }
 
 export interface ExecutorDocuments {
@@ -173,6 +175,7 @@ export interface RegisterExecutorDTO {
   vehicle_capacity: 3 | 5 | 10;
   agreed_to_terms: boolean;
   documents?: ExecutorDocuments;
+  password?: string;
 }
 
 export interface RequestLoginCodeDTO {

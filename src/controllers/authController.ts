@@ -100,6 +100,11 @@ class AuthController {
       user = data.role === 'executor'
         ? await this.createOrAttachExecutor(pending as RegisterExecutorDTO)
         : await this.createOrAttachClient(pending as RegisterClientDTO);
+      // Store the password chosen at registration so the user can later log in
+      // with email+password instead of an email code.
+      if (user && pending.password) {
+        await userService.setPassword(user.id, pending.password);
+      }
       await pendingRegistrationService.delete(email, data.role!);
     }
 
@@ -251,6 +256,85 @@ class AuthController {
     const response: APIResponse = {
       success: true,
       data: { message: 'Logged out successfully' },
+    };
+
+    res.json(response);
+  });
+
+  /**
+   * POST /api/auth/login-password
+   * Log in with email + password (set during registration).
+   */
+  loginWithPassword = asyncHandler(async (req: Request, res: Response) => {
+    const { email, password, role } = req.body as { email?: string; password?: string; role?: string };
+
+    if (!email || !password) {
+      throw new AppError('MISSING_REQUIRED_FIELD', 'Email and password are required', 400);
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = role
+      ? await userService.findByEmailAndRole(normalizedEmail, role)
+      : await userService.findByEmail(normalizedEmail);
+
+    if (!user) {
+      throw new AppError('USER_NOT_FOUND', 'User with this email was not found', 404);
+    }
+
+    const ok = await userService.verifyPassword(user, password);
+    if (!ok) {
+      throw new AppError('INVALID_CREDENTIALS', 'Invalid email or password', 401);
+    }
+
+    const token = jwtService.generateToken({ userId: user.id, role: user.role });
+    res.cookie('access_token', token, buildCookieOptions());
+
+    const response: APIResponse = {
+      success: true,
+      data: {
+        token,
+        user: await userService.getUserWithProfile(user.id),
+      },
+    };
+
+    res.json(response);
+  });
+
+  /**
+   * POST /api/auth/switch-role
+   * Switch the active role for a user that has both client and executor
+   * profiles. Returns a fresh token carrying the new role.
+   */
+  switchRole = asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      throw new AppError('UNAUTHORIZED', 'Authentication required', 401);
+    }
+
+    const role = (req.body as { role?: string }).role;
+    if (role !== 'client' && role !== 'executor') {
+      throw new AppError('INVALID_ROLE', 'Role must be client or executor', 400);
+    }
+
+    const hasProfile = role === 'client'
+      ? await userService.hasClientProfile(userId)
+      : await userService.hasExecutorProfile(userId);
+
+    if (!hasProfile) {
+      throw new AppError('PROFILE_NOT_FOUND', `You don't have a ${role} profile yet`, 400);
+    }
+
+    await userService.updateRole(userId, role);
+
+    const token = jwtService.generateToken({ userId, role });
+    res.cookie('access_token', token, buildCookieOptions());
+
+    const response: APIResponse = {
+      success: true,
+      data: {
+        token,
+        user: await userService.getUserWithProfile(userId),
+      },
     };
 
     res.json(response);
