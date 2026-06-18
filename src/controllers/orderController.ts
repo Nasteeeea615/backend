@@ -39,6 +39,18 @@ class OrderController {
       throw new AppError('INVALID_PAYMENT_METHOD', 'Payment type must be cash or sbp', 400);
     }
 
+    // Reject scheduled dates in the past (compared at day granularity).
+    const scheduled = new Date(data.scheduled_date as any);
+    if (isNaN(scheduled.getTime())) {
+      throw new AppError('INVALID_DATE', 'Некорректная дата заказа', 400);
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const scheduledDay = new Date(scheduled.getFullYear(), scheduled.getMonth(), scheduled.getDate());
+    if (scheduledDay.getTime() < today.getTime()) {
+      throw new AppError('INVALID_DATE', 'Дата не может быть в прошлом', 400);
+    }
+
     // Create order
     const order = await orderService.createOrder(req.user.id, data);
 
